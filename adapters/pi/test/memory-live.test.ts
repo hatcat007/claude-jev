@@ -14,7 +14,7 @@ after(() => {
   for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: process.env["npm_lifecycle_event"] !== "test:live" }, async () => {
+test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: process.env["npm_lifecycle_event"] === "test:live" ? false : "live Jev call: run npm run test:live" }, async () => {
   assert.ok(hasKey(), "npm run test:live needs a Jev key: set TYPESAFE_API_KEY, OPENROUTER_API_KEY or EXPLABS_API_KEY");
 
   const previous = process.env["CLAUDE_CONFIG_DIR"];
