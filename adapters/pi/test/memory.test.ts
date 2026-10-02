@@ -330,3 +330,17 @@ test("eligible still reaches earlier messages when the latest 40 hold secrets", 
 
   assert.deepEqual(out.map((c) => c.text), [safe.text]);
 });
+
+test("saveNotes overwrites and removes a stale temporary file from an earlier failed write", async () => {
+  await withConfigDir((cwd) => {
+    const [name] = noteFile(LINT, "feedback", undefined, "2026-10-02");
+    const stale = path.join(memoryDir(cwd), `${name}.md.${process.pid}.tmp`);
+
+    fs.mkdirSync(memoryDir(cwd), { recursive: true });
+    fs.writeFileSync(stale, "half a no");
+
+    assert.equal(saveNotes([pick(LINT)], cwd, identity, undefined).length, 1);
+    assert.deepEqual(fs.readdirSync(memoryDir(cwd)).filter((f) => f.endsWith(".tmp")), []);
+    assert.ok(fs.readFileSync(path.join(memoryDir(cwd), `${name}.md`), "utf8").includes(LINT));
+  });
+});

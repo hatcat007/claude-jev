@@ -197,19 +197,17 @@ function publish(file: string, body: string): boolean {
   const temp = `${file}.${process.pid}.tmp`;
 
   try {
-    fs.writeFileSync(temp, body, { flag: "wx" });
-  } catch {
-    return false;
-  }
-
-  try {
+    fs.writeFileSync(temp, body);
     fs.linkSync(temp, file);
 
     return true;
   } catch {
     return false;
   } finally {
-    fs.rmSync(temp, { force: true });
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+    }
   }
 }
 
