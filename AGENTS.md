@@ -21,6 +21,7 @@ building it, and cite it when resisting.
 | `plugin.json` | Agent Plugins 1.0.0 identity. Claude Code still loads `.claude-plugin/plugin.json` and `hooks/`. |
 | `src/` | The TypeScript hook implementations the plugin runs, executed directly as source under node type stripping (needs node >= 22.18) |
 | `src/compact/strategy.ts` | Shared compaction strategy: checks, thresholds, `selectBlocks`. `src/compactor.ts` is the Claude rows bridge. |
+| `src/mcp-server.ts` | Opt-in stdio MCP server (`jev_check`, `jev_classify`, `jev_score`, `jev_decide`) over the same client as the hooks; `docs/mcp-server.md` has host setup. Not a hook and never required. |
 | `adapters/afk/` | The AFK host adapter: a TypeScript implementation of the same hooks with its own manifest, `hooks.json`, and README. Its known-gaps list is the contract — do not claim parity that table does not state. |
 | `adapters/pi/` | The Pi adapter. `package.json` `pi.extensions` points at `adapters/pi/jev.ts` (`session_before_compact` and `/jev`). Selection imports `src/compact/strategy.ts`. Block shaping, the `<read-files>` index, the 14k+2k split, and Pi logs stay in the adapter. |
 | `scripts/comparators.py` | ast-grep lookups the rule hook adds to a judgment |
