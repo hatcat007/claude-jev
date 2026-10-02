@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -128,6 +129,16 @@ interface ResolvedKey {
   provider: Provider;
 }
 
+export function hasKey(): boolean {
+  try {
+    resolveKey();
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveKey(): ResolvedKey {
   const pinned = pinnedProvider();
 
@@ -150,6 +161,11 @@ export interface DecisionBackend {
   ask(state: string, questions: Questions, timeoutMs: number): Promise<Answers>;
 }
 
+interface CallTrace {
+  callId: string;
+  attempt: number;
+}
+
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 
 async function typedAskOnce(
@@ -159,7 +175,8 @@ async function typedAskOnce(
   key: string,
   state: string,
   questions: Questions,
-  timeoutMs: number
+  timeoutMs: number,
+  trace: CallTrace
 ): Promise<Answers> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -188,11 +205,11 @@ async function typedAskOnce(
       throw new Error("backend returned no answers");
     }
 
-    logCall(providerName, model, Object.keys(questions).length, Date.now() - started, null);
+    logCall(providerName, model, Object.keys(questions).length, Date.now() - started, null, trace);
 
     return payload.answers;
   } catch (e) {
-    logCall(providerName, model, Object.keys(questions).length, Date.now() - started, String(e));
+    logCall(providerName, model, Object.keys(questions).length, Date.now() - started, String(e), trace);
 
     throw e;
   } finally {
@@ -212,10 +229,14 @@ async function askWithRetry(
   timeoutMs: number
 ): Promise<Answers> {
   const deadline = Date.now() + timeoutMs;
+  const callId = crypto.randomUUID();
 
   for (let attempt = 0; ; attempt++) {
     try {
-      return await typedAskOnce(url, providerName, model, key, state, questions, Math.max(1, deadline - Date.now()));
+      return await typedAskOnce(url, providerName, model, key, state, questions, Math.max(1, deadline - Date.now()), {
+        callId,
+        attempt: attempt + 1,
+      });
     } catch (e) {
       if (!/HTTP 5\d\d/.test(String(e)) || attempt >= MAX_RETRIES_5XX || Date.now() + 300 >= deadline) throw e;
 
@@ -224,7 +245,7 @@ async function askWithRetry(
   }
 }
 
-const MAX_QUESTIONS: Record<string, number> = { experiential: 32 };
+const MAX_QUESTIONS = { experiential: 32 } as const;
 
 async function typedAsk(
   url: string,
@@ -235,7 +256,7 @@ async function typedAsk(
   questions: Questions,
   timeoutMs: number
 ): Promise<Answers> {
-  const cap = MAX_QUESTIONS[providerName];
+  const cap = providerName === "experiential" ? MAX_QUESTIONS.experiential : undefined;
   const entries = Object.entries(questions);
 
   if (!cap || entries.length <= cap) {
@@ -255,7 +276,7 @@ async function typedAsk(
   return Object.assign({}, ...parts);
 }
 
-function logCall(provider: string, model: string, n: number, ms: number, error: string | null): void {
+function logCall(provider: string, model: string, n: number, ms: number, error: string | null, trace: CallTrace): void {
   try {
     const dir = configDir();
 
@@ -270,6 +291,8 @@ function logCall(provider: string, model: string, n: number, ms: number, error: 
       ms,
       ok: error === null,
       v: pluginVersion(),
+      call_id: trace.callId,
+      attempt: trace.attempt,
       error: error?.slice(0, 300),
     };
 

@@ -16,6 +16,7 @@ import {
   type Kept,
   type Stats,
 } from "./compact/strategy.ts";
+import { curateMemory } from "./compact/memory.ts";
 
 export const ROWS_HEADER =
   "This session's history was compacted by Jev. Every message below " +
@@ -24,6 +25,8 @@ export const ROWS_HEADER =
   "without asking the user to repeat anything.";
 
 const STATS_LOG = "jev-compact-log.jsonl";
+
+const MEMORY_LOG = "jev-memory-log.jsonl";
 
 export interface CompactRow {
   role?: JsonValue;
@@ -42,6 +45,8 @@ interface LoggedStats extends Stats {
   rows_in?: number;
   rows_out?: number;
   passed_through?: number;
+  memory_asked?: number;
+  memory_saved?: number;
 }
 
 export function rowText(row: CompactRow): string | null {
@@ -67,6 +72,16 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bsk-or-[A-Za-z0-9_-]{16,}/g, "sk-or-[REDACTED]"],
   [/\bsk-ant-[A-Za-z0-9_-]{16,}/g, "sk-ant-[REDACTED]"],
   [/\bsk-[A-Za-z0-9_-]{32,}/g, "sk-[REDACTED]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "github_pat_[REDACTED]"],
+  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, "gh_[REDACTED]"],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "aws-[REDACTED]"],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "xox-[REDACTED]"],
+  [/\bAIza[A-Za-z0-9_-]{35}\b/g, "AIza[REDACTED]"],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g, "stripe-[REDACTED]"],
+  [/\bnpm_[A-Za-z0-9]{30,}/g, "npm_[REDACTED]"],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "jwt-[REDACTED]"],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[PRIVATE KEY REDACTED]"],
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/g, "Bearer [REDACTED]"],
 ];
 
 export function redactSecrets(text: string): string {
@@ -79,6 +94,14 @@ export function redactSecrets(text: string): string {
 
 function plainRow(row: CompactRow): boolean {
   return !row.toolUses && !row.toolResults;
+}
+
+function hasItems(value: JsonValue | undefined): boolean {
+  return isJsonArray(value) ? value.length > 0 : Boolean(value);
+}
+
+function noToolActivity(row: CompactRow): boolean {
+  return !hasItems(row.toolUses) && !hasItems(row.toolResults);
 }
 
 function textRow(role: string, text: string): CompactRow {
@@ -95,7 +118,7 @@ function rowsOut(blocks: ClaudeBlock[], kept: Kept[]): CompactRow[] {
     const text = redactSecrets(k.text);
 
     if (row && plainRow(row) && k.text === block.text) {
-      out.push(typeof row.text === "string" ? { ...row, text: redactSecrets(row.text) } : row);
+      out.push(isString(row.text) ? { ...row, text: redactSecrets(row.text) } : row);
     } else out.push(textRow(block.role, text));
   }
 
@@ -115,6 +138,7 @@ function logStats(sessionId: string | undefined, stats: LoggedStats): void {
       session_id: sessionId ?? null,
       source: "rows",
       ...stats,
+      rows: stats.rows.map((r) => ({ ...r, ref: redactSecrets(r.ref) })),
     };
 
     appendLogLine(STATS_LOG, JSON.stringify(row));
@@ -127,7 +151,78 @@ interface CompactEvent {
   instructions?: string;
   cwd?: string;
   session_id?: string;
-  messages?: unknown;
+  messages?: JsonValue;
+  memory?: boolean;
+}
+
+function incomingRows(messages: JsonValue | undefined): CompactRow[] {
+  const out: CompactRow[] = [];
+
+  for (const r of isJsonArray(messages) ? messages : []) {
+    if (isJsonObject(r)) out.push(r);
+  }
+
+  return out;
+}
+
+function claudeBlocks(incoming: CompactRow[]): ClaudeBlock[] {
+  const blocks: ClaudeBlock[] = [];
+
+  for (let i = incoming.length - 1; i >= 0; i--) {
+    if (blocks.length === MAX_BLOCKS + RESCUE_BLOCKS) break;
+    const r = incoming[i]!;
+    const text = rowText(r);
+
+    if (text !== null) blocks.push({ role: isString(r.role) ? r.role : "assistant", text, row: r });
+  }
+
+  return blocks.reverse();
+}
+
+function memoryBlocks(incoming: CompactRow[]): Block[] {
+  const out: Block[] = [];
+
+  for (const r of incoming) {
+    if (r.role !== "user" || !noToolActivity(r)) continue;
+    const text = rowText(r);
+
+    if (text !== null) out.push({ role: "user", text });
+  }
+
+  return out;
+}
+
+export async function memoryOnly(): Promise<number> {
+  let reply = "{}";
+
+  try {
+    const event = await readStdinJson<CompactEvent>();
+    const blocks = memoryBlocks(incomingRows(event.messages));
+
+    if (event.cwd && blocks.length > 0) {
+      const result = await curateMemory(blocks, event.cwd, redactSecrets, event.session_id);
+
+      appendLogLine(
+        MEMORY_LOG,
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          session_id: event.session_id ?? null,
+          source: "memory",
+          trigger: event.trigger,
+          memory_asked: result.asked,
+          memory_saved: result.saved.length,
+        })
+      );
+
+      reply = JSON.stringify({ asked: result.asked, saved: result.saved.length });
+    }
+  } catch (e) {
+    reply = JSON.stringify({ error: String(e).slice(0, 300) });
+  }
+
+  process.stdout.write(reply + "\n");
+
+  return 0;
 }
 
 export async function rows(): Promise<number> {
@@ -141,23 +236,15 @@ export async function rows(): Promise<number> {
 
   const directive = (event.instructions ?? "").trim().slice(0, DIRECTIVE_CHARS) || null;
 
-  const incoming = (isJsonArray(event.messages) ? event.messages : []).filter((r): r is CompactRow =>
-    isJsonObject(r)
-  );
-
-  const blocks: ClaudeBlock[] = [];
-
-  for (let i = incoming.length - 1; i >= 0; i--) {
-    if (blocks.length === MAX_BLOCKS + RESCUE_BLOCKS) break;
-    const r = incoming[i]!;
-    const text = rowText(r);
-
-    if (text !== null) blocks.push({ role: isString(r.role) ? r.role : "assistant", text, row: r });
-  }
-
-  blocks.reverse();
+  const incoming = incomingRows(event.messages);
+  const blocks = claudeBlocks(incoming);
 
   if (blocks.length === 0) return fallback("no judgeable rows");
+
+  const memoryRun =
+    event.memory === true && event.cwd
+      ? curateMemory(memoryBlocks(incoming), event.cwd, redactSecrets, event.session_id).catch(() => null)
+      : Promise.resolve(null);
 
   let kept: Kept[];
   let stats: LoggedStats;
@@ -166,6 +253,13 @@ export async function rows(): Promise<number> {
     [kept, stats] = await selectBlocks(blocks, event.cwd ?? null, directive);
   } catch (e) {
     return fallback(`jev: ${String(e)}`);
+  }
+
+  const memory = await memoryRun;
+
+  if (memory) {
+    stats.memory_asked = memory.asked;
+    stats.memory_saved = memory.saved.length;
   }
 
   stats.trigger = event.trigger;
@@ -196,8 +290,12 @@ if (isMain) {
         process.stdout.write(JSON.stringify({ fallback: `compactor: ${String(e)}` }) + "\n");
         process.exit(0);
       });
+  } else if (process.argv[2] === "memory") {
+    memoryOnly()
+      .then((code) => process.exit(code))
+      .catch(() => process.exit(0));
   } else {
-    process.stderr.write("usage: compactor.ts rows  (reads a session.compact event on stdin)\n");
+    process.stderr.write("usage: compactor.ts rows|memory  (reads a session.compact event on stdin)\n");
     process.exit(2);
   }
 }

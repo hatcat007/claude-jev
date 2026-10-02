@@ -6,7 +6,7 @@ import { after, before, test } from "node:test";
 import { isString, parseJsonObject } from "../../afk/src/shared/json.ts";
 import { missingKeyMessage, PROVIDERS, providerFor, resolve, status } from "../client.ts";
 
-const VARS = ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "JEV_PROVIDER", "JEV_MODEL"];
+const VARS = ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "JEV_PROVIDER", "JEV_MODEL", "EXPLABS_API_KEY"];
 
 const saved = new Map(VARS.map((name) => [name, process.env[name]]));
 
@@ -51,7 +51,8 @@ test("providerFor lets the key prefix pick, so an sk-or- key anywhere calls Open
   assert.equal(providerFor("sk-or-abc").name, "openrouter");
   assert.equal(providerFor("ts_abc").name, "typesafe");
   assert.equal(providerFor("").name, "typesafe");
-  assert.equal(PROVIDERS.length, 2);
+  assert.equal(providerFor("xpl_abc").name, "experiential");
+  assert.equal(PROVIDERS.length, 3);
 });
 
 test("resolve reads only the process environment when given no dotenv path", () => {
@@ -65,7 +66,7 @@ test("resolve reports a missing key instead of raising", () => {
   setEnv({});
   rmSync(files.dotEnv, { force: true });
   assert.deepEqual(resolve(files), { source: "missing", key: "", provider: undefined });
-  assert.equal(missingKeyMessage(undefined), "set TYPESAFE_API_KEY or OPENROUTER_API_KEY");
+  assert.equal(missingKeyMessage(undefined), "set TYPESAFE_API_KEY or OPENROUTER_API_KEY or EXPLABS_API_KEY");
 });
 
 test("resolve reads the launch environment", () => {

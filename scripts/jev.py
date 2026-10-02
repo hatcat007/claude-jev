@@ -30,6 +30,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,7 +98,13 @@ def caller_name() -> str:
 
 
 def log_call(
-    provider: Provider, model: str, n_questions: int, t0: float, error: str | None
+    provider: Provider,
+    model: str,
+    n_questions: int,
+    t0: float,
+    error: str | None,
+    call_id: str = "",
+    attempt: int = 1,
 ) -> None:
     """Append one call record. Never raises: the caller is mid-request and a
     log failure must not change what `ask` returns or what it raises."""
@@ -112,6 +119,8 @@ def log_call(
             "ms": int((time.monotonic() - t0) * 1000),
             "ok": error is None,
             "v": version(),
+            "call_id": call_id,
+            "attempt": attempt,
         }
         if error is not None:
             rec["error"] = error[:300]
@@ -230,6 +239,7 @@ def ask(
         method="POST",
     )
     n = len(questions) if isinstance(questions, dict) else 0
+    call_id = uuid.uuid4().hex
     attempts = 0
     while True:
         attempts += 1
@@ -242,10 +252,10 @@ def ask(
                 payload = json.loads(resp.read().decode())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:500]
-            log_call(provider, body["model"], n, t0, f"HTTP {e.code}: {detail}")
+            log_call(provider, body["model"], n, t0, f"HTTP {e.code}: {detail}", call_id, attempts)
             raise JevError(f"HTTP {e.code}: {detail}") from e
         except (urllib.error.URLError, TimeoutError, OSError) as e:
-            log_call(provider, body["model"], n, t0, str(e))
+            log_call(provider, body["model"], n, t0, str(e), call_id, attempts)
             if (
                 attempts == 1
                 and t0 + FAST_FAIL > time.monotonic()
@@ -253,7 +263,7 @@ def ask(
             ):
                 continue
             raise JevError(str(e)) from e
-        log_call(provider, body["model"], n, t0, None)
+        log_call(provider, body["model"], n, t0, None, call_id, attempts)
         return payload.get("answers", {})
 
 

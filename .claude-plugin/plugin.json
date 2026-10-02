@@ -1,7 +1,7 @@
 {
   "name": "claude-jev",
   "version": "0.28.0",
-  "description": "Hands the small judgments in a session to TypeSafe's Jev, a System One model that returns typed answers instead of generating text: what kind of request each prompt is, which model tier a subagent needs, whether an edit breaks a rule already written in your CLAUDE.md or AGENTS.md, and which transcript blocks survive compaction. Kept blocks carry over verbatim — no LLM writes a summary.",
+  "description": "Hands the small judgments in a session to TypeSafe's Jev, a System One model that returns typed answers instead of generating text: what kind of request each prompt is, which model tier a subagent needs, whether an edit breaks a rule already written in your CLAUDE.md or AGENTS.md, and which transcript blocks survive compaction. Kept blocks carry over verbatim \u2014 no LLM writes a summary.",
   "author": {
     "name": "0x7067"
   },
@@ -57,6 +57,18 @@
       "title": "Compaction",
       "description": "Replace the compaction summary with the transcript blocks Jev keeps. Needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1.",
       "default": true
+    },
+    "completionCheck": {
+      "type": "boolean",
+      "title": "Completion check",
+      "description": "At the end of each turn, ask whether the reply stopped short of the request and send the agent back to finish.",
+      "default": true
+    },
+    "memoryCuration": {
+      "type": "boolean",
+      "title": "Memory curation",
+      "description": "At compaction, save durable user preferences, corrections and decisions verbatim to the project's memory directory. Needs CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1.",
+      "default": false
     }
   }
 }

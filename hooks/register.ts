@@ -4,6 +4,8 @@ const PLUGIN = "claude-jev";
 
 const PANE_ID = "claude-jev";
 
+const STATS_COMMAND = "jev-stats";
+
 const KEY_FIELD = "typesafeApiKey";
 
 const PENDING_KEY = "pendingSave";
@@ -15,6 +17,8 @@ const TOGGLES = [
   ["subagentRouter", "Subagent model routing"],
   ["rules", "Rule checks"],
   ["compaction", "Compaction"],
+  ["completionCheck", "Completion check"],
+  ["memoryCuration", "Memory curation"],
 ];
 
 const KEY_LABELS = { env: "from the environment", saved: "saved", missing: "missing" };
@@ -108,9 +112,9 @@ function keyLabel() {
   return provider ? `${KEY_LABELS[info.key]} · ${provider}` : KEY_LABELS[info.key];
 }
 
-async function loadStats($) {
+async function loadStats($, args = []) {
   try {
-    const run = await runPython($, ["stats.py"]);
+    const run = await runPython($, ["stats.py", ...args]);
     statsReport = run.exitCode === 0 ? run.stdout.trimEnd() : `stats.py failed: ${run.stderr.trim().slice(0, 300)}`;
   } catch (err) {
     statsReport = `stats.py failed: ${String(err)}`;
@@ -175,7 +179,7 @@ function openPane($) {
     title: "claude-jev (saved for all sessions)",
     focus: true,
     closeOnEscape: true,
-    rows: 12,
+    rows: 14,
   });
 }
 
@@ -447,6 +451,10 @@ export function register(on, options) {
         name: PLUGIN,
         description: "Manage claude-jev: API key, provider, and which hooks run",
       });
+      await $.command.register({
+        name: STATS_COMMAND,
+        description: "Jev API call stats: failures, latency and retries by provider and hook",
+      });
       await resumeAfterSave($).catch(() => undefined);
     }
 
@@ -459,6 +467,18 @@ export function register(on, options) {
     await refreshInfo($);
     await openPane($);
     await placeRing($, menuRow);
+
+    return {};
+  });
+
+  on("command.run", { command: STATS_COMMAND }, async ($, _e, _next) => {
+    view = "stats";
+    menuRow = "menu:stats";
+    statsReport = undefined;
+    await openPane($);
+    await placeRing($, "stats:back");
+    await loadStats($, ["--calls"]);
+    await $.ui.invalidate("ui.render");
 
     return {};
   });
@@ -489,7 +509,31 @@ export function register(on, options) {
   });
 
   on("session.compact", async ($, e, next) => {
-    if (loaded.compaction === false) return next(e);
+    if (loaded.compaction === false) {
+      if (loaded.memoryCuration === true) {
+        try {
+          const [cwd, sessionId] = await Promise.all([$.session.cwd(), $.session.id()]);
+
+          const run = await runNode(
+            $,
+            ["src/compactor.ts", "memory"],
+            JSON.stringify({ trigger: e.trigger, cwd, session_id: sessionId, messages: e.messages }),
+          );
+
+          if (run.exitCode !== 0) {
+            await $.ui.log(`jev-memory: exit ${run.exitCode}: ${run.stderr.slice(0, 200)}`);
+          } else {
+            const result = JSON.parse(run.stdout || "{}");
+
+            if (result.error) await $.ui.log(`jev-memory: ${result.error}`);
+          }
+        } catch (err) {
+          await $.ui.log(`jev-memory: ${String(err)}`);
+        }
+      }
+
+      return next(e);
+    }
 
     const fallThrough = async (why) => {
       await $.ui.log(`jev-compact: ${why}; built-in summary runs`);
@@ -509,6 +553,7 @@ export function register(on, options) {
           instructions: e.instructions ?? null,
           cwd,
           session_id: sessionId,
+          memory: loaded.memoryCuration === true,
           messages: e.messages,
         }),
       );

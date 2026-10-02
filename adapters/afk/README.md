@@ -117,6 +117,7 @@ Edits in the 0.50-0.80 range are not blocked. The hook prints them as `additiona
 - **`patch_apply` is not judged**: the rule hook reads `edit_file` and `write_file` input only, so edits made through `patch_apply` land unjudged.
 - **Named agents are not routed**: a spawn with an `agent_type` takes that agent's model defaults, so the hook skips the tier question and only checks the brief.
 - **No transcript access**: Hooks receive only the current event, not the conversation. The prompt router uses the prompt alone (the Python adapter also uses the previous turn).
+- **The completion check is Claude Code only**: the root `hooks/hooks.json` registers `src/completion.ts` on `Stop`, but it reads the transcript to find the request and the final reply, and AFK gives hooks no transcript, so it does nothing there. AFK also allows a Stop handler 5 s while the check budgets 8 s. Do not copy that entry when wiring this adapter by hand.
 - **No compaction hook**: AFK CLI hooks do not expose the transcript access needed for Jev-scored compaction.
 
 ## File structure
