@@ -155,6 +155,7 @@ interface Decision {
   p: number;
   reason: string;
   band: Band;
+  exempt: boolean;
 }
 
 export function decide(answers: Answers): Decision {
@@ -164,7 +165,7 @@ export function decide(answers: Answers): Decision {
   const exempt = EXEMPT_REASONS.has(reason);
   const band: Band = exempt ? "none" : p >= ACT_BAND ? "act" : p >= FLAG_BAND ? "flag" : "none";
 
-  return { p, reason, band };
+  return { p, reason, band, exempt };
 }
 
 async function main(): Promise<void> {

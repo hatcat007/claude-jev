@@ -7,16 +7,19 @@
 - **Completion check:** 16 turns that stopped short of the request (finished part of a multi-part task, deferred the rest, asked permission for work already requested, described a fix without making it, reported work without running the requested verification) and 16 turns that were fine (finished and verified, a concrete blocker such as `EROFS` or `permission denied`, a decision only the user can make, a plain answer to a question).
 - **Memory curation:** 16 lasting statements (standing preferences, project rules, facts about the user, pointers) and 16 messages that only matter in the session (one-off tasks, questions, acknowledgements).
 
-## Result, 2026-10-02, `jev-latest`
+## Result, 2026-10-02, `jev-latest`, two runs
+
+The sweep scores each turn by its raw probability and applies the stop-reason exemptions, so every row is measured at its own cut-off. A first run reported the 0.50 and 0.60 rows through the fixed 0.6 flag band, which could not see scores between 0.50 and 0.60; the second run fixes that, and the figures below are from it unless a range is shown.
 
 | Threshold | Completion: stopped-short caught | Completion: fine turns flagged | Memory: lasting saved | Memory: one-off saved |
 |---|---|---|---|---|
-| 0.50 to 0.80 | 16/16 | 0/16 | 16/16 | 0/16 |
-| 0.85 | 16/16 | 0/16 | 16/16 | 0/16 |
-| 0.90 | 16/16 | 0/16 | 15/16 | 0/16 |
+| 0.50 to 0.85 | 16/16 | 0/16 | 16/16 | 0/16 |
+| 0.90 | 16/16 | 0/16 | 15/16 to 16/16 | 0/16 |
 | 0.95 | 12/16 | 0/16 | 12/16 | 0/16 |
 
-Both curves are flat from 0.5 to 0.85 and only lose recall above 0.9, so on these cases any cut between 0.5 and 0.85 gives the same result and the data does not pick one. The chosen cuts sit at the strict end of that plateau on purpose: a block interrupts the user and a saved note persists across sessions, so the cost of a wrong positive is higher than the cost of a miss. Block at 0.85 and flag at 0.6 for the completion check; save at 0.8 for memory.
+The two runs agree everywhere except memory at 0.90, so there is some run-to-run variation near the top of the range.
+
+Both curves are flat from 0.5 to 0.85 and only lose recall at or above 0.9, so on these cases any cut between 0.5 and 0.85 gives the same result and the data does not pick one. The chosen cuts sit at the strict end of that plateau on purpose: a block interrupts the user and a saved note persists across sessions, so the cost of a wrong positive is higher than the cost of a miss. Block at 0.85 and flag at 0.6 for the completion check; save at 0.8 for memory.
 
 ## What this does not show
 

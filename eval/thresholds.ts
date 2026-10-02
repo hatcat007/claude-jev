@@ -98,8 +98,14 @@ function pct(n: number, d: number): string {
   return d === 0 ? "-" : `${Math.round((100 * n) / d)}%`;
 }
 
-async function turnScores(): Promise<{ case: TurnCase; p: number; band: string }[]> {
-  const out: { case: TurnCase; p: number; band: string }[] = [];
+interface TurnScore {
+  case: TurnCase;
+  p: number;
+  exempt: boolean;
+}
+
+async function turnScores(): Promise<TurnScore[]> {
+  const out: TurnScore[] = [];
 
   for (let i = 0; i < TURNS.length; i += 6) {
     const batch = TURNS.slice(i, i + 6);
@@ -117,7 +123,7 @@ async function turnScores(): Promise<{ case: TurnCase; p: number; band: string }
     batch.forEach((c, k) => {
       const d = decide(results[k] ?? {});
 
-      out.push({ case: c, p: d.p, band: d.band });
+      out.push({ case: c, p: d.p, exempt: d.exempt });
     });
   }
 
@@ -148,14 +154,14 @@ async function main(): Promise<void> {
   console.log("  threshold  caught   wrongly flagged");
 
   for (const t of STEPS) {
-    const caught = shorts.filter((s) => s.p >= t && s.band !== "none").length;
-    const wrong = fines.filter((s) => s.p >= t && s.band !== "none").length;
+    const caught = shorts.filter((s) => !s.exempt && s.p >= t).length;
+    const wrong = fines.filter((s) => !s.exempt && s.p >= t).length;
 
     console.log(`  ${t.toFixed(2)}       ${caught}/${shorts.length} ${pct(caught, shorts.length).padStart(4)}   ${wrong}/${fines.length} ${pct(wrong, fines.length).padStart(4)}`);
   }
 
-  const missed = shorts.filter((s) => s.band === "none" || s.p < ACT_BAND).map((s) => `${s.p.toFixed(2)} ${s.case.reply.slice(0, 60)}`);
-  const falseAlarms = fines.filter((s) => s.band === "act").map((s) => `${s.p.toFixed(2)} ${s.case.reply.slice(0, 60)}`);
+  const missed = shorts.filter((s) => s.exempt || s.p < ACT_BAND).map((s) => `${s.p.toFixed(2)} ${s.case.reply.slice(0, 60)}`);
+  const falseAlarms = fines.filter((s) => !s.exempt && s.p >= ACT_BAND).map((s) => `${s.p.toFixed(2)} ${s.case.reply.slice(0, 60)}`);
 
   console.log(`  below block threshold: ${missed.length}`);
   missed.forEach((m) => console.log(`    - ${m}`));
