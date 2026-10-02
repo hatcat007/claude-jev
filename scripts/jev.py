@@ -45,6 +45,9 @@ PROVIDERS = (
     Provider(
         "openrouter", "https://openrouter.ai/api/v1/systemone", "sk-or-", "OPENROUTER_API_KEY"
     ),
+    Provider(
+        "experiential", "https://api.experientiallabs.ai/v1/systemone", "xpl_", "EXPLABS_API_KEY"
+    ),
 )
 DEFAULT_MODEL = "jev-latest"
 DEFAULT_TIMEOUT = 8.0
