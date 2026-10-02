@@ -3,11 +3,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import { hasKey, type Answers } from "../../afk/src/shared/jev-client.ts";
+import type { Answers } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
   candidates,
-  curateMemory,
   saveNotes,
   normalize,
   memoryDir,
@@ -292,20 +291,5 @@ test("saveNotes keeps at most five notes, highest confidence first", async () =>
     assert.equal(saved.length, 5);
     assert.deepEqual(saved.map((x) => x.p), saved.map((x) => x.p).sort((a, b) => b - a));
     assert.equal(Math.max(...saved.map((x) => x.p)), saved[0]!.p);
-  });
-});
-
-test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: process.env["JEV_LIVE_TESTS"] !== "1" || !hasKey() }, async () => {
-  await withConfigDir(async (cwd) => {
-    const result = await curateMemory(
-      [user(LINT), user("Please rename the function fooBar to bazQux in src/util.ts and rerun the tests.")],
-      cwd,
-      identity,
-      "live1234"
-    );
-
-    assert.equal(result.asked, 2);
-    assert.equal(result.saved.length, 1);
-    assert.ok(fs.readFileSync(path.join(memoryDir(cwd), result.saved[0]!.file), "utf8").includes(LINT));
   });
 });

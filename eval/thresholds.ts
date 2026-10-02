@@ -1,7 +1,7 @@
 import { jevAsk } from "../adapters/afk/src/shared/jev-client.ts";
 import { completionBundle } from "../adapters/afk/src/shared/questions.ts";
-import { decide, ACT_BAND, FLAG_BAND } from "../src/completion.ts";
-import { memoryQuestions, memoryState, verdict, MEMORY_THRESHOLD } from "../src/compact/memory.ts";
+import { decide, ACT_BAND, BUDGET_MS, FLAG_BAND } from "../src/completion.ts";
+import { candidates, memoryQuestions, memoryState, verdict, MEMORY_THRESHOLD, TIMEOUT_MS } from "../src/compact/memory.ts";
 
 interface TurnCase {
   task: string;
@@ -115,7 +115,7 @@ async function turnScores(): Promise<TurnScore[]> {
         jevAsk(
           `The user's request: ${c.task}\n\nThe assistant's final reply this turn (end of reply):\n${c.reply}`,
           completionBundle(),
-          8000
+          BUDGET_MS
         )
       )
     );
@@ -130,13 +130,19 @@ async function turnScores(): Promise<TurnScore[]> {
   return out;
 }
 
-async function noteScores(): Promise<{ case: NoteCase; p: number }[]> {
+function eligibleNotes(): NoteCase[] {
+  const eligible = new Set(candidates(NOTES.map((n) => ({ role: "user", text: n.text }))).map((c) => c.i));
+
+  return NOTES.filter((_, i) => eligible.has(i));
+}
+
+async function noteScores(pool: NoteCase[]): Promise<{ case: NoteCase; p: number }[]> {
   const out: { case: NoteCase; p: number }[] = [];
 
-  for (let i = 0; i < NOTES.length; i += 10) {
-    const batch = NOTES.slice(i, i + 10);
+  for (let i = 0; i < pool.length; i += 10) {
+    const batch = pool.slice(i, i + 10);
     const cands = batch.map((c, k) => ({ i: k, text: c.text }));
-    const answers = await jevAsk(memoryState(cands), memoryQuestions(cands), 8000);
+    const answers = await jevAsk(memoryState(cands), memoryQuestions(cands), TIMEOUT_MS);
 
     batch.forEach((c, k) => out.push({ case: c, p: verdict(answers, k).p }));
   }
@@ -168,11 +174,12 @@ async function main(): Promise<void> {
   console.log(`  blocked although fine: ${falseAlarms.length}`);
   falseAlarms.forEach((m) => console.log(`    - ${m}`));
 
-  const notes = await noteScores();
+  const pool = eligibleNotes();
+  const notes = await noteScores(pool);
   const lasting = notes.filter((n) => n.case.lasting);
   const oneOff = notes.filter((n) => !n.case.lasting);
 
-  console.log(`\nmemory curation: ${lasting.length} lasting statements, ${oneOff.length} one-off messages`);
+  console.log(`\nmemory curation: ${lasting.length} lasting statements, ${oneOff.length} one-off messages (${NOTES.length - pool.length} of ${NOTES.length} cases left out because curation never sees messages that short)`);
   console.log(`  chosen: save at ${MEMORY_THRESHOLD}`);
   console.log("  threshold  saved    wrongly saved");
 

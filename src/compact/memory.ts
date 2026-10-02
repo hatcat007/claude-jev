@@ -18,7 +18,7 @@ const MIN_CHARS = 25;
 
 const MAX_CHARS = 1200;
 
-const TIMEOUT_MS = 2500;
+export const TIMEOUT_MS = 2500;
 
 const TYPES = ["user", "feedback", "project", "reference"] as const;
 

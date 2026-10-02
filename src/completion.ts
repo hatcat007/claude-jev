@@ -32,7 +32,7 @@ const MAX_REPLY_CHARS = 2400;
 
 const MIN_REPLY_CHARS = 20;
 
-const BUDGET_MS = 8000;
+export const BUDGET_MS = 8000;
 
 const EXEMPT_REASONS = new Set(["blocked", "needs_user", "chat"]);
 

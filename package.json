@@ -11,7 +11,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test:pi": "node --experimental-strip-types --test adapters/pi/test/*.test.ts",
-    "test:live": "JEV_LIVE_TESTS=1 node --experimental-strip-types --test adapters/pi/test/memory.test.ts"
+    "test:live": "node --experimental-strip-types --test adapters/pi/test/memory.live.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
