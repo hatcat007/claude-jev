@@ -189,46 +189,24 @@ export function verdict(answers: Answers, k: number): MemoryVerdict {
   return { p, type };
 }
 
-export async function curateMemory(
-  blocks: Block[],
+export interface Pick {
+  c: Candidate;
+  p: number;
+  type: MemoryType;
+}
+
+export function saveNotes(
+  picks: Pick[],
   cwd: string,
   redact: (text: string) => string,
-  sessionId: string | undefined,
-  ask: typeof jevAsk = jevAsk
-): Promise<MemoryResult> {
-  const cands = candidates(blocks);
-
-  if (cands.length === 0) return { asked: 0, saved: [] };
-
-  const chunks: Candidate[][] = [];
-
-  for (let i = 0; i < cands.length; i += CHUNK) chunks.push(cands.slice(i, i + CHUNK));
-
-  const answered = await Promise.all(
-    chunks.map((chunk) => ask(memoryState(chunk), memoryQuestions(chunk), TIMEOUT_MS).catch(() => null))
-  );
-
+  sessionId: string | undefined
+): Saved[] {
   const dir = memoryDir(cwd);
   const known = existingNotes(dir);
   const date = new Date().toISOString().slice(0, 10);
   const saved: Saved[] = [];
-  const picks: { c: Candidate; p: number; type: MemoryType }[] = [];
 
-  chunks.forEach((chunk, n) => {
-    const answers = answered[n];
-
-    if (!answers) return;
-
-    chunk.forEach((c, k) => {
-      const { p, type } = verdict(answers, k);
-
-      if (p >= MEMORY_THRESHOLD) picks.push({ c, p, type });
-    });
-  });
-
-  picks.sort((a, b) => b.p - a.p);
-
-  for (const pick of picks) {
+  for (const pick of [...picks].sort((a, b) => b.p - a.p)) {
     if (saved.length >= MAX_SAVED) break;
     const text = redact(pick.c.text);
 
@@ -250,5 +228,40 @@ export async function curateMemory(
     saved.push({ file: `${name}.md`, type: pick.type, p: pick.p });
   }
 
-  return { asked: cands.length, saved };
+  return saved;
+}
+
+export async function curateMemory(
+  blocks: Block[],
+  cwd: string,
+  redact: (text: string) => string,
+  sessionId: string | undefined
+): Promise<MemoryResult> {
+  const cands = candidates(blocks);
+
+  if (cands.length === 0) return { asked: 0, saved: [] };
+
+  const chunks: Candidate[][] = [];
+
+  for (let i = 0; i < cands.length; i += CHUNK) chunks.push(cands.slice(i, i + CHUNK));
+
+  const answered = await Promise.all(
+    chunks.map((chunk) => jevAsk(memoryState(chunk), memoryQuestions(chunk), TIMEOUT_MS).catch(() => null))
+  );
+
+  const picks: Pick[] = [];
+
+  chunks.forEach((chunk, n) => {
+    const answers = answered[n];
+
+    if (!answers) return;
+
+    chunk.forEach((c, k) => {
+      const { p, type } = verdict(answers, k);
+
+      if (p >= MEMORY_THRESHOLD) picks.push({ c, p, type });
+    });
+  });
+
+  return { asked: cands.length, saved: saveNotes(picks, cwd, redact, sessionId) };
 }

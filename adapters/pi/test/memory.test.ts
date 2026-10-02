@@ -3,11 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import type { Answers, Questions } from "../../afk/src/shared/jev-client.ts";
+import type { Answers } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
   candidates,
   curateMemory,
+  saveNotes,
   normalize,
   memoryDir,
   memoryQuestions,
@@ -211,15 +212,7 @@ test("decide does not exempt a permission request", () => {
   assert.equal(decide(answers).band, "act");
 });
 
-const sure = async (_state: string, questions: Questions): Promise<Answers> =>
-  Object.fromEntries(
-    Object.keys(questions).map((k) => [
-      k,
-      k.startsWith("memory_") ? { noul: 0.95 } : { choice: "feedback", confidence: 0.9 },
-    ])
-  );
-
-async function withConfigDir<T>(run: (cwd: string) => Promise<T>): Promise<T> {
+async function withConfigDir<T>(run: (cwd: string) => T | Promise<T>): Promise<T> {
   const previous = process.env["CLAUDE_CONFIG_DIR"];
 
   process.env["CLAUDE_CONFIG_DIR"] = tempDir("jev-cfg-");
@@ -234,59 +227,87 @@ async function withConfigDir<T>(run: (cwd: string) => Promise<T>): Promise<T> {
 
 const identity = (text: string) => text;
 
-test("curateMemory saves a note once and skips it on the next compaction", async () => {
-  await withConfigDir(async (cwd) => {
-    const blocks = [user("Always run the linter before you commit anything in this repo.")];
-    const first = await curateMemory(blocks, cwd, identity, "sess1234", sure);
-    const second = await curateMemory(blocks, cwd, identity, "sess1234", sure);
+const pick = (text: string, p = 0.95) => ({ c: { i: 0, text }, p, type: "feedback" as const });
 
-    assert.equal(first.saved.length, 1);
-    assert.equal(second.saved.length, 0);
+const LINT = "Always run the linter before you commit anything in this repo.";
+
+test("saveNotes saves a note once and skips it on the next compaction", async () => {
+  await withConfigDir((cwd) => {
+    const first = saveNotes([pick(LINT)], cwd, identity, "sess1234");
+    const second = saveNotes([pick(LINT)], cwd, identity, "sess1234");
+
+    assert.equal(first.length, 1);
+    assert.equal(second.length, 0);
     assert.equal(fs.readdirSync(memoryDir(cwd)).filter((f) => f !== "MEMORY.md").length, 1);
   });
 });
 
-test("curateMemory does not overwrite a file that already holds the name", async () => {
-  await withConfigDir(async (cwd) => {
-    const text = "Always run the linter before you commit anything in this repo.";
-    const [name] = noteFile(text, "feedback", undefined, "2026-10-02");
+test("saveNotes dedupes picks that differ only in case and spacing", async () => {
+  await withConfigDir((cwd) => {
+    const saved = saveNotes([pick(LINT), pick(LINT.toUpperCase().replace(" ", "  "), 0.9)], cwd, identity, undefined);
+
+    assert.equal(saved.length, 1);
+  });
+});
+
+test("saveNotes does not overwrite a file that already holds the name", async () => {
+  await withConfigDir((cwd) => {
+    const [name] = noteFile(LINT, "feedback", undefined, "2026-10-02");
     const file = path.join(memoryDir(cwd), `${name}.md`);
 
     fs.mkdirSync(memoryDir(cwd), { recursive: true });
     fs.writeFileSync(file, "someone else's note");
 
-    const result = await curateMemory([user(text)], cwd, identity, undefined, sure);
-
-    assert.equal(result.saved.length, 0);
+    assert.equal(saveNotes([pick(LINT)], cwd, identity, undefined).length, 0);
     assert.equal(fs.readFileSync(file, "utf8"), "someone else's note");
     assert.ok(!fs.existsSync(path.join(memoryDir(cwd), "MEMORY.md")));
   });
 });
 
-test("curateMemory saves a short note that is only a substring of an older one", async () => {
-  await withConfigDir(async (cwd) => {
-    const longer = "Always run the linter before you commit anything in this repo, and also run the type checker.";
+test("saveNotes saves a short note that is only a substring of an older one", async () => {
+  await withConfigDir((cwd) => {
+    const longer = `${LINT} Also run the type checker.`;
     const [name, body] = noteFile(longer, "feedback", undefined, "2026-10-02");
 
     fs.mkdirSync(memoryDir(cwd), { recursive: true });
     fs.writeFileSync(path.join(memoryDir(cwd), `${name}.md`), body);
 
-    const result = await curateMemory([user("run the linter before you commit anything in this repo")], cwd, identity, undefined, sure);
-
-    assert.equal(result.saved.length, 1);
+    assert.equal(saveNotes([pick("run the linter before you commit anything in this repo")], cwd, identity, undefined).length, 1);
   });
 });
 
-test("curateMemory skips a message the redactor would change", async () => {
+test("saveNotes skips a message the redactor would change", async () => {
+  await withConfigDir((cwd) => {
+    const secret = "Deploy with the token ghp_abcdefghijklmnopqrstuvwxyz0123 for every future session.";
+
+    assert.equal(saveNotes([pick(secret)], cwd, (t) => t.replace(/ghp_\w+/g, "gh_[REDACTED]"), undefined).length, 0);
+  });
+});
+
+test("saveNotes keeps at most five notes, highest confidence first", async () => {
+  await withConfigDir((cwd) => {
+    const many = Array.from({ length: 8 }, (_, n) => pick(`Standing rule number ${n} for every session of this project.`, 0.8 + n / 100));
+    const saved = saveNotes(many, cwd, identity, undefined);
+
+    assert.equal(saved.length, 5);
+    assert.deepEqual(saved.map((x) => x.p), saved.map((x) => x.p).sort((a, b) => b - a));
+    assert.equal(Math.max(...saved.map((x) => x.p)), saved[0]!.p);
+  });
+});
+
+const liveKey = ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "EXPLABS_API_KEY"].some((v) => process.env[v]);
+
+test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: !liveKey }, async () => {
   await withConfigDir(async (cwd) => {
     const result = await curateMemory(
-      [user("Deploy with the token ghp_abcdefghijklmnopqrstuvwxyz0123 for every future session.")],
+      [user(LINT), user("Please rename the function fooBar to bazQux in src/util.ts and rerun the tests.")],
       cwd,
-      (t) => t.replace(/ghp_\w+/g, "gh_[REDACTED]"),
-      undefined,
-      sure
+      identity,
+      "live1234"
     );
 
-    assert.equal(result.saved.length, 0);
+    assert.equal(result.asked, 2);
+    assert.equal(result.saved.length, 1);
+    assert.ok(fs.readFileSync(path.join(memoryDir(cwd), result.saved[0]!.file), "utf8").includes(LINT));
   });
 });
