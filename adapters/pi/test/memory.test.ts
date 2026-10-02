@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test } from "node:test";
+import { after, test } from "node:test";
 import type { Answers } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
@@ -72,8 +72,22 @@ test("memoryDir follows the project slug", () => {
   assert.ok(memoryDir("/home/u/my.proj").endsWith(path.join("projects", "-home-u-my-proj", "memory")));
 });
 
+const tempDirs: string[] = [];
+
+function tempDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+
+  tempDirs.push(dir);
+
+  return dir;
+}
+
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 function transcript(lines: unknown[]): string {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "jev-")), "t.jsonl");
+  const file = path.join(tempDir("jev-"), "t.jsonl");
 
   fs.writeFileSync(file, lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
 
@@ -131,7 +145,7 @@ test("noteFile quotes a description that starts with a bracket", () => {
 });
 
 test("appendIndex escapes the label so text cannot rewrite the link", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-mem-"));
+  const dir = tempDir("jev-mem-");
 
   appendIndex(dir, "note-abc123", "see [docs](http://evil.example) for the rule");
   const line = fs.readFileSync(path.join(dir, "MEMORY.md"), "utf8");
@@ -162,4 +176,45 @@ test("lastTurn keeps a request that starts with a heading or a path", () => {
   ]);
 
   assert.equal(lastTurn(file)?.uuid, "h1");
+});
+
+test("noteFile bounds the filename for a single very long word", () => {
+  const [name] = noteFile("x".repeat(1200), "feedback", undefined, "2026-10-02");
+
+  assert.ok(name.length <= 60);
+});
+
+test("lastTurn finds the request however many lines the turn spans", () => {
+  const filler = Array.from({ length: 1500 }, () => ({
+    type: "assistant",
+    message: { content: [{ type: "tool_use", name: "Bash" }] },
+  }));
+
+  const file = transcript([
+    { type: "user", uuid: "old", message: { content: "an older request about something else" } },
+    { type: "assistant", message: { content: [{ type: "text", text: "older reply" }] } },
+    { type: "user", uuid: "cur", message: { content: "the current long running request" } },
+    ...filler,
+    { type: "assistant", message: { content: [{ type: "text", text: "finished the current request" }] } },
+  ]);
+
+  assert.equal(lastTurn(file)?.uuid, "cur");
+});
+
+test("decide does not exempt a permission request", () => {
+  const answers: Answers = {
+    stopped_short: { noul: 0.95 },
+    stop_reason: { choice: "asked_permission", confidence: 0.9 },
+  };
+
+  assert.equal(decide(answers).band, "act");
+});
+
+test("an exclusive create refuses to overwrite an existing note", () => {
+  const dir = tempDir("jev-wx-");
+  const file = path.join(dir, "note.md");
+
+  fs.writeFileSync(file, "first", { flag: "wx" });
+  assert.throws(() => fs.writeFileSync(file, "second", { flag: "wx" }));
+  assert.equal(fs.readFileSync(file, "utf8"), "first");
 });

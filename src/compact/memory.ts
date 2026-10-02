@@ -100,16 +100,22 @@ export function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
-function existingText(dir: string): string {
+const NOTE_BODY = /^---\n[\s\S]*?\n---\n\n([\s\S]*?)\n\n\*\*Source:\*\*/;
+
+function existingNotes(dir: string): Set<string> {
+  const known = new Set<string>();
+
   try {
-    return fs
-      .readdirSync(dir)
-      .filter((f) => f.endsWith(".md") && f !== "MEMORY.md")
-      .map((f) => normalize(fs.readFileSync(path.join(dir, f), "utf8")))
-      .join("\n");
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".md") || f === "MEMORY.md") continue;
+      const raw = fs.readFileSync(path.join(dir, f), "utf8");
+
+      known.add(normalize(NOTE_BODY.exec(raw)?.[1] ?? raw));
+    }
   } catch {
-    return "";
   }
+
+  return known;
 }
 
 function slugOf(text: string): string {
@@ -119,6 +125,7 @@ function slugOf(text: string): string {
     .trim()
     .split(" ")
     .slice(0, 6)
+    .map((w) => w.slice(0, 24))
     .join("-");
 
   const hash = crypto.createHash("sha256").update(normalize(text)).digest("hex").slice(0, 6);
@@ -201,7 +208,7 @@ export async function curateMemory(
   );
 
   const dir = memoryDir(cwd);
-  let known = existingText(dir);
+  const known = existingNotes(dir);
   const date = new Date().toISOString().slice(0, 10);
   const saved: Saved[] = [];
   const picks: { c: Candidate; p: number; type: MemoryType }[] = [];
@@ -226,15 +233,19 @@ export async function curateMemory(
 
     if (text !== pick.c.text) continue;
 
-    if (known.includes(normalize(text))) continue;
+    if (known.has(normalize(text))) continue;
     const [name, body] = noteFile(text, pick.type, sessionId, date);
 
     fs.mkdirSync(dir, { recursive: true });
 
-    if (fs.existsSync(path.join(dir, `${name}.md`))) continue;
-    fs.writeFileSync(path.join(dir, `${name}.md`), body);
+    try {
+      fs.writeFileSync(path.join(dir, `${name}.md`), body, { flag: "wx" });
+    } catch {
+      continue;
+    }
+
     appendIndex(dir, name, text);
-    known += `\n${normalize(text)}`;
+    known.add(normalize(text));
     saved.push({ file: `${name}.md`, type: pick.type, p: pick.p });
   }
 

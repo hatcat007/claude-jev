@@ -22,7 +22,7 @@ const FLAG = 0.6;
 
 const MAX_BLOCKS = 2;
 
-const MAX_TAIL = 600;
+const MAX_TRANSCRIPT_BYTES = 64_000_000;
 
 const TASK_HEAD_CHARS = 900;
 
@@ -67,11 +67,14 @@ function readBlocks(sessionId: string): number {
   }
 }
 
-function writeBlocks(sessionId: string, blocks: number): void {
+function writeBlocks(sessionId: string, blocks: number): boolean {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
     fs.writeFileSync(statePath(sessionId), JSON.stringify({ blocks }));
+
+    return true;
   } catch {
+    return false;
   }
 }
 
@@ -94,7 +97,8 @@ export function lastTurn(transcriptPath: string | undefined): Turn | null {
   let lines: string[];
 
   try {
-    lines = fs.readFileSync(transcriptPath, "utf8").split("\n").slice(-MAX_TAIL);
+    if (fs.statSync(transcriptPath).size > MAX_TRANSCRIPT_BYTES) return null;
+    lines = fs.readFileSync(transcriptPath, "utf8").split("\n");
   } catch {
     return null;
   }
@@ -130,6 +134,7 @@ interface CompletionRow {
   reason?: string;
   band?: Band;
   blocked?: boolean;
+  capped?: boolean;
   ms?: number;
   error?: string;
 }
@@ -184,14 +189,15 @@ async function main(): Promise<void> {
     const ms = Math.round(performance.now() - t0);
     const { p, reason, band } = decide(answers);
     const used = readBlocks(sid);
-    const blocking = band === "act" && used < MAX_BLOCKS;
+    const wantsBlock = band === "act";
+    const capped = wantsBlock && used >= MAX_BLOCKS;
+    const blocking = wantsBlock && !capped && writeBlocks(sid, used + 1);
 
-    log(event, { turn: turn.uuid, p, reason, band, blocked: blocking, ms });
+    log(event, { turn: turn.uuid, p, reason, band, blocked: blocking, capped, ms });
 
     const out: StopOutput = {};
 
     if (blocking) {
-      writeBlocks(sid, used + 1);
       out.decision = "block";
       out.reason =
         "Your last reply ended before the request was finished. " +

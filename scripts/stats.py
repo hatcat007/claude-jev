@@ -369,9 +369,13 @@ def print_completion(entries: list[dict]) -> None:
         return
     acted = sum(1 for e in rows if e.get("blocked"))
     flagged = sum(1 for e in rows if e.get("band") == "flag")
+    capped = sum(1 for e in rows if e.get("band") == "act" and not e.get("blocked"))
     reasons = collections.Counter(e.get("reason") or "?" for e in rows)
     print(f"\nCompletion check ({len(rows)} turns judged):")
-    print(f"  sent back to finish: {acted}, flagged only: {flagged}")
+    print(
+        f"  sent back to finish: {acted}, flagged only: {flagged}, "
+        f"high confidence but not blocked (per-session cap reached or state unwritable): {capped}"
+    )
     print("  stop reasons: " + ", ".join(f"{k} {v}" for k, v in sorted(reasons.items())))
 
 

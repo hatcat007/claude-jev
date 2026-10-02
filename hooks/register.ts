@@ -179,7 +179,7 @@ function openPane($) {
     title: "claude-jev (saved for all sessions)",
     focus: true,
     closeOnEscape: true,
-    rows: 12,
+    rows: 14,
   });
 }
 
@@ -509,7 +509,23 @@ export function register(on, options) {
   });
 
   on("session.compact", async ($, e, next) => {
-    if (loaded.compaction === false) return next(e);
+    if (loaded.compaction === false) {
+      if (loaded.memoryCuration === true) {
+        try {
+          const [cwd, sessionId] = await Promise.all([$.session.cwd(), $.session.id()]);
+
+          await runNode(
+            $,
+            ["src/compactor.ts", "memory"],
+            JSON.stringify({ trigger: e.trigger, cwd, session_id: sessionId, messages: e.messages }),
+          );
+        } catch (err) {
+          await $.ui.log(`jev-memory: ${String(err)}`);
+        }
+      }
+
+      return next(e);
+    }
 
     const fallThrough = async (why) => {
       await $.ui.log(`jev-compact: ${why}; built-in summary runs`);

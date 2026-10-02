@@ -26,6 +26,8 @@ export const ROWS_HEADER =
 
 const STATS_LOG = "jev-compact-log.jsonl";
 
+const MEMORY_LOG = "jev-memory-log.jsonl";
+
 export interface CompactRow {
   role?: JsonValue;
   text?: JsonValue;
@@ -94,6 +96,14 @@ function plainRow(row: CompactRow): boolean {
   return !row.toolUses && !row.toolResults;
 }
 
+function hasItems(value: JsonValue | undefined): boolean {
+  return isJsonArray(value) ? value.length > 0 : Boolean(value);
+}
+
+function noToolActivity(row: CompactRow): boolean {
+  return !hasItems(row.toolUses) && !hasItems(row.toolResults);
+}
+
 function textRow(role: string, text: string): CompactRow {
   return { role, text, toolUses: [], toolResults: [] };
 }
@@ -141,8 +151,63 @@ interface CompactEvent {
   instructions?: string;
   cwd?: string;
   session_id?: string;
-  messages?: unknown;
+  messages?: JsonValue;
   memory?: boolean;
+}
+
+function incomingRows(messages: JsonValue | undefined): CompactRow[] {
+  const out: CompactRow[] = [];
+
+  for (const r of isJsonArray(messages) ? messages : []) {
+    if (isJsonObject(r)) out.push(r);
+  }
+
+  return out;
+}
+
+function claudeBlocks(incoming: CompactRow[]): ClaudeBlock[] {
+  const blocks: ClaudeBlock[] = [];
+
+  for (let i = incoming.length - 1; i >= 0; i--) {
+    if (blocks.length === MAX_BLOCKS + RESCUE_BLOCKS) break;
+    const r = incoming[i]!;
+    const text = rowText(r);
+
+    if (text !== null) blocks.push({ role: isString(r.role) ? r.role : "assistant", text, row: r });
+  }
+
+  return blocks.reverse();
+}
+
+export async function memoryOnly(): Promise<number> {
+  try {
+    const event = await readStdinJson<CompactEvent>();
+
+    const blocks = claudeBlocks(incomingRows(event.messages)).filter(
+      (b) => b.row !== undefined && noToolActivity(b.row)
+    );
+
+    if (event.cwd && blocks.length > 0) {
+      const result = await curateMemory(blocks, event.cwd, redactSecrets, event.session_id);
+
+      appendLogLine(
+        MEMORY_LOG,
+        JSON.stringify({
+          ts: new Date().toISOString(),
+          session_id: event.session_id ?? null,
+          source: "memory",
+          trigger: event.trigger,
+          memory_asked: result.asked,
+          memory_saved: result.saved.length,
+        })
+      );
+    }
+  } catch {
+  }
+
+  process.stdout.write("{}\n");
+
+  return 0;
 }
 
 export async function rows(): Promise<number> {
@@ -156,27 +221,14 @@ export async function rows(): Promise<number> {
 
   const directive = (event.instructions ?? "").trim().slice(0, DIRECTIVE_CHARS) || null;
 
-  const incoming = (isJsonArray(event.messages) ? event.messages : []).filter((r): r is CompactRow =>
-    isJsonObject(r)
-  );
-
-  const blocks: ClaudeBlock[] = [];
-
-  for (let i = incoming.length - 1; i >= 0; i--) {
-    if (blocks.length === MAX_BLOCKS + RESCUE_BLOCKS) break;
-    const r = incoming[i]!;
-    const text = rowText(r);
-
-    if (text !== null) blocks.push({ role: isString(r.role) ? r.role : "assistant", text, row: r });
-  }
-
-  blocks.reverse();
+  const incoming = incomingRows(event.messages);
+  const blocks = claudeBlocks(incoming);
 
   if (blocks.length === 0) return fallback("no judgeable rows");
 
   const memoryRun =
     event.memory === true && event.cwd
-      ? curateMemory(blocks.filter((b) => b.row !== undefined && plainRow(b.row)), event.cwd, redactSecrets, event.session_id).catch(() => null)
+      ? curateMemory(blocks.filter((b) => b.row !== undefined && noToolActivity(b.row)), event.cwd, redactSecrets, event.session_id).catch(() => null)
       : Promise.resolve(null);
 
   let kept: Kept[];
@@ -223,8 +275,10 @@ if (isMain) {
         process.stdout.write(JSON.stringify({ fallback: `compactor: ${String(e)}` }) + "\n");
         process.exit(0);
       });
+  } else if (process.argv[2] === "memory") {
+    memoryOnly().then((code) => process.exit(code));
   } else {
-    process.stderr.write("usage: compactor.ts rows  (reads a session.compact event on stdin)\n");
+    process.stderr.write("usage: compactor.ts rows|memory  (reads a session.compact event on stdin)\n");
     process.exit(2);
   }
 }
