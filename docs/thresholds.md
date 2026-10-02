@@ -9,9 +9,9 @@
 
 ## Results, 2026-10-02, `jev-latest`, three runs
 
-The sweep scores each turn by its raw probability and applies the stop-reason exemptions, so every row is measured at its own cut-off. The first run reported the 0.50 and 0.60 completion rows through the fixed 0.6 flag band, which could not see scores between 0.50 and 0.60, and it scored all 32 memory messages with an 8 s deadline. The figures below are from the third run, which fixes both; the earlier runs differ only where noted.
+The table counts cases whose score reaches each cut-off. It does not run the save step, so it shows which cases would pass the threshold, not which notes would be written: production also keeps at most five notes per compaction, highest score first, and skips duplicates and messages the redactor would change. The sweep scores each turn by its raw probability and applies the stop-reason exemptions, so every row is measured at its own cut-off. The first run reported the 0.50 and 0.60 completion rows through the fixed 0.6 flag band, which could not see scores between 0.50 and 0.60, and it scored all 32 memory messages with an 8 s deadline. The figures below are from the third run, which fixes both; the earlier runs differ only where noted.
 
-| Threshold | Completion: stopped-short caught | Completion: fine turns flagged | Memory: lasting saved | Memory: one-off saved |
+| Threshold | Completion: stopped-short turns at or above the cut | Completion: fine turns at or above the cut | Memory: lasting statements at or above the cut | Memory: one-off messages at or above the cut |
 |---|---|---|---|---|
 | 0.50 to 0.85 | 16/16 | 0/16 | 16/16 | 0/14 |
 | 0.90 | 16/16 | 0/16 | 16/16 (15/16 in the first run) | 0/14 |

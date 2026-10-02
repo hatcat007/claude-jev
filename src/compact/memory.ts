@@ -189,6 +189,26 @@ export function verdict(answers: Answers, k: number): MemoryVerdict {
   return { p, type };
 }
 
+function publish(file: string, body: string): boolean {
+  const temp = `${file}.${process.pid}.tmp`;
+
+  try {
+    fs.writeFileSync(temp, body, { flag: "wx" });
+  } catch {
+    return false;
+  }
+
+  try {
+    fs.linkSync(temp, file);
+
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(temp, { force: true });
+  }
+}
+
 export interface Pick {
   c: Candidate;
   p: number;
@@ -217,13 +237,17 @@ export function saveNotes(
 
     fs.mkdirSync(dir, { recursive: true });
 
+    const file = path.join(dir, `${name}.md`);
+
+    if (!publish(file, body)) continue;
+
     try {
-      fs.writeFileSync(path.join(dir, `${name}.md`), body, { flag: "wx" });
+      appendIndex(dir, name, text);
     } catch {
+      fs.rmSync(file, { force: true });
       continue;
     }
 
-    appendIndex(dir, name, text);
     known.add(normalize(text));
     saved.push({ file: `${name}.md`, type: pick.type, p: pick.p });
   }
@@ -237,7 +261,7 @@ export async function curateMemory(
   redact: (text: string) => string,
   sessionId: string | undefined
 ): Promise<MemoryResult> {
-  const cands = candidates(blocks);
+  const cands = candidates(blocks).filter((c) => redact(c.text) === c.text);
 
   if (cands.length === 0) return { asked: 0, saved: [] };
 

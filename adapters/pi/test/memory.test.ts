@@ -7,6 +7,7 @@ import type { Answers } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
   candidates,
+  curateMemory,
   saveNotes,
   normalize,
   memoryDir,
@@ -291,5 +292,31 @@ test("saveNotes keeps at most five notes, highest confidence first", async () =>
     assert.equal(saved.length, 5);
     assert.deepEqual(saved.map((x) => x.p), saved.map((x) => x.p).sort((a, b) => b - a));
     assert.equal(Math.max(...saved.map((x) => x.p)), saved[0]!.p);
+  });
+});
+
+test("curateMemory sends nothing to Jev for a message the redactor would change", async () => {
+  await withConfigDir(async (cwd) => {
+    const secret = "Deploy with the token ghp_abcdefghijklmnopqrstuvwxyz0123 for every future session.";
+    const result = await curateMemory([user(secret)], cwd, (t) => t.replace(/ghp_\w+/g, "gh_[REDACTED]"), undefined);
+
+    assert.deepEqual(result, { asked: 0, saved: [] });
+  });
+});
+
+test("saveNotes removes the note when the index cannot be appended", async () => {
+  await withConfigDir((cwd) => {
+    fs.mkdirSync(path.join(memoryDir(cwd), "MEMORY.md"), { recursive: true });
+
+    assert.equal(saveNotes([pick(LINT)], cwd, identity, undefined).length, 0);
+    assert.deepEqual(fs.readdirSync(memoryDir(cwd)), ["MEMORY.md"]);
+  });
+});
+
+test("saveNotes leaves no temporary files behind", async () => {
+  await withConfigDir((cwd) => {
+    saveNotes([pick(LINT), pick("Never push directly to main in this project, open a pull request instead.")], cwd, identity, undefined);
+
+    assert.deepEqual(fs.readdirSync(memoryDir(cwd)).filter((f) => f.endsWith(".tmp")), []);
   });
 });
