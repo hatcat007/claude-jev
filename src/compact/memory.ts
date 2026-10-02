@@ -59,6 +59,10 @@ export function candidates(blocks: Block[]): Candidate[] {
   return out.slice(-MAX_CANDIDATES);
 }
 
+export function eligible(blocks: Block[], redact: (text: string) => string): Candidate[] {
+  return candidates(blocks.filter((b) => redact(b.text) === b.text));
+}
+
 export function memoryQuestions(chunk: Candidate[]): Questions {
   const questions: Questions = {};
 
@@ -261,7 +265,7 @@ export async function curateMemory(
   redact: (text: string) => string,
   sessionId: string | undefined
 ): Promise<MemoryResult> {
-  const cands = candidates(blocks).filter((c) => redact(c.text) === c.text);
+  const cands = eligible(blocks, redact);
 
   if (cands.length === 0) return { asked: 0, saved: [] };
 

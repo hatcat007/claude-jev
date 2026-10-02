@@ -8,6 +8,7 @@ import {
   appendIndex,
   candidates,
   curateMemory,
+  eligible,
   saveNotes,
   normalize,
   memoryDir,
@@ -319,4 +320,13 @@ test("saveNotes leaves no temporary files behind", async () => {
 
     assert.deepEqual(fs.readdirSync(memoryDir(cwd)).filter((f) => f.endsWith(".tmp")), []);
   });
+});
+
+test("eligible still reaches earlier messages when the latest 40 hold secrets", () => {
+  const redact = (t: string) => t.replace(/ghp_\w+/g, "gh_[REDACTED]");
+  const secrets = Array.from({ length: 45 }, (_, n) => user(`Use the deploy token ghp_abcdefghijklmnopqrstuvwxyz${n} for every future session.`));
+  const safe = user("Always run the linter before you commit anything in this repo.");
+  const out = eligible([safe, ...secrets], redact);
+
+  assert.deepEqual(out.map((c) => c.text), [safe.text]);
 });
