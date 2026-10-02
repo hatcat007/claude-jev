@@ -239,7 +239,7 @@ def ask(
         method="POST",
     )
     n = len(questions) if isinstance(questions, dict) else 0
-    call_id = uuid.uuid4().hex[:8]
+    call_id = uuid.uuid4().hex
     attempts = 0
     while True:
         attempts += 1

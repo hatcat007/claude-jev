@@ -70,6 +70,16 @@ const SECRET_PATTERNS: [RegExp, string][] = [
   [/\bsk-or-[A-Za-z0-9_-]{16,}/g, "sk-or-[REDACTED]"],
   [/\bsk-ant-[A-Za-z0-9_-]{16,}/g, "sk-ant-[REDACTED]"],
   [/\bsk-[A-Za-z0-9_-]{32,}/g, "sk-[REDACTED]"],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}/g, "github_pat_[REDACTED]"],
+  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, "gh_[REDACTED]"],
+  [/\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g, "aws-[REDACTED]"],
+  [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, "xox-[REDACTED]"],
+  [/\bAIza[A-Za-z0-9_-]{35}\b/g, "AIza[REDACTED]"],
+  [/\b[sr]k_(?:live|test)_[A-Za-z0-9]{16,}/g, "stripe-[REDACTED]"],
+  [/\bnpm_[A-Za-z0-9]{30,}/g, "npm_[REDACTED]"],
+  [/\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}/g, "jwt-[REDACTED]"],
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(?:-----END [A-Z ]*PRIVATE KEY-----|$)/g, "[PRIVATE KEY REDACTED]"],
+  [/\bBearer\s+[A-Za-z0-9._~+/=-]{20,}/g, "Bearer [REDACTED]"],
 ];
 
 export function redactSecrets(text: string): string {
@@ -166,7 +176,7 @@ export async function rows(): Promise<number> {
 
   const memoryRun =
     event.memory === true && event.cwd
-      ? curateMemory(blocks, event.cwd, redactSecrets, event.session_id).catch(() => null)
+      ? curateMemory(blocks.filter((b) => b.row !== undefined && plainRow(b.row)), event.cwd, redactSecrets, event.session_id).catch(() => null)
       : Promise.resolve(null);
 
   let kept: Kept[];

@@ -327,7 +327,9 @@ def retry_stats(calls: list[dict]) -> tuple[int, int, int, int]:
     count as single attempts."""
     by_id = collections.defaultdict(list)
     for i, c in enumerate(calls):
-        by_id[c.get("call_id") or f"row{i}"].append(c)
+        call_id = c.get("call_id")
+        key = (call_id, c.get("provider"), c.get("caller")) if call_id else (f"row{i}",)
+        by_id[key].append(c)
     retried = recovered = failed = 0
     for group in by_id.values():
         last = max(group, key=lambda c: (c.get("attempt") or 1, c.get("ts", "")))

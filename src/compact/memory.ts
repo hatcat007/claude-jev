@@ -18,7 +18,7 @@ const MIN_CHARS = 25;
 
 const MAX_CHARS = 1200;
 
-const TIMEOUT_MS = 6000;
+const TIMEOUT_MS = 2500;
 
 const TYPES = ["user", "feedback", "project", "reference"] as const;
 
@@ -96,7 +96,7 @@ export function memoryState(chunk: Candidate[]): string {
   return `User messages from an AI coding-assistant session being compacted, numbered from [0].\n\n${body}`;
 }
 
-function normalize(text: string): string {
+export function normalize(text: string): string {
   return text.toLowerCase().replace(/\s+/g, " ").trim();
 }
 
@@ -121,7 +121,7 @@ function slugOf(text: string): string {
     .slice(0, 6)
     .join("-");
 
-  const hash = crypto.createHash("sha256").update(text).digest("hex").slice(0, 6);
+  const hash = crypto.createHash("sha256").update(normalize(text)).digest("hex").slice(0, 6);
 
   return `${words || "note"}-${hash}`;
 }
@@ -138,7 +138,7 @@ export function noteFile(text: string, type: MemoryType, sessionId: string | und
   const body = [
     "---",
     `name: ${name}`,
-    `description: ${oneLine(text, 120).replace(/:/g, " -")}`,
+    `description: ${JSON.stringify(oneLine(text, 120))}`,
     "metadata:",
     `  type: ${type}`,
     "---",
@@ -152,9 +152,10 @@ export function noteFile(text: string, type: MemoryType, sessionId: string | und
   return [name, body];
 }
 
-function appendIndex(dir: string, name: string, text: string): void {
+export function appendIndex(dir: string, name: string, text: string): void {
   const index = path.join(dir, "MEMORY.md");
-  const line = `- [${oneLine(text, 60)}](${name}.md) — ${oneLine(text, 100)}\n`;
+  const label = oneLine(text, 60).replace(/[\\[\]()]/g, (c) => `\\${c}`);
+  const line = `- [${label}](${name}.md) — ${oneLine(text, 100)}\n`;
   let current = "";
 
   try {
@@ -200,7 +201,7 @@ export async function curateMemory(
   );
 
   const dir = memoryDir(cwd);
-  const known = existingText(dir);
+  let known = existingText(dir);
   const date = new Date().toISOString().slice(0, 10);
   const saved: Saved[] = [];
   const picks: { c: Candidate; p: number; type: MemoryType }[] = [];
@@ -223,6 +224,8 @@ export async function curateMemory(
     if (saved.length >= MAX_SAVED) break;
     const text = redact(pick.c.text);
 
+    if (text !== pick.c.text) continue;
+
     if (known.includes(normalize(text))) continue;
     const [name, body] = noteFile(text, pick.type, sessionId, date);
 
@@ -231,6 +234,7 @@ export async function curateMemory(
     if (fs.existsSync(path.join(dir, `${name}.md`))) continue;
     fs.writeFileSync(path.join(dir, `${name}.md`), body);
     appendIndex(dir, name, text);
+    known += `\n${normalize(text)}`;
     saved.push({ file: `${name}.md`, type: pick.type, p: pick.p });
   }
 

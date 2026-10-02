@@ -219,7 +219,7 @@ async function askWithRetry(
   timeoutMs: number
 ): Promise<Answers> {
   const deadline = Date.now() + timeoutMs;
-  const callId = crypto.randomUUID().slice(0, 8);
+  const callId = crypto.randomUUID();
 
   for (let attempt = 0; ; attempt++) {
     try {

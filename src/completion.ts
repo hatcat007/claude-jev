@@ -24,7 +24,9 @@ const MAX_BLOCKS = 2;
 
 const MAX_TAIL = 600;
 
-const MAX_TASK_CHARS = 600;
+const TASK_HEAD_CHARS = 900;
+
+const TASK_TAIL_CHARS = 600;
 
 const MAX_REPLY_CHARS = 2400;
 
@@ -78,7 +80,13 @@ function realPrompt(data: Json): string {
   const message = isJsonObject(data["message"]) ? data["message"] : undefined;
   const text = textOf(message).trim();
 
-  return text.startsWith("<") || text.startsWith("/") || text.startsWith("#") ? "" : text;
+  return text.startsWith("<") ? "" : text;
+}
+
+export function clipTask(task: string): string {
+  if (task.length <= TASK_HEAD_CHARS + TASK_TAIL_CHARS) return task;
+
+  return `${task.slice(0, TASK_HEAD_CHARS)}\n[... middle of the request omitted ...]\n${task.slice(-TASK_TAIL_CHARS)}`;
 }
 
 export function lastTurn(transcriptPath: string | undefined): Turn | null {
@@ -103,7 +111,7 @@ export function lastTurn(transcriptPath: string | undefined): Turn | null {
     const task = realPrompt(data);
 
     if (task) {
-      return { uuid: isString(data["uuid"]) ? data["uuid"] : "", task: task.slice(0, MAX_TASK_CHARS), reply };
+      return { uuid: isString(data["uuid"]) ? data["uuid"] : "", task: clipTask(task), reply };
     }
 
     if (!reply && data["type"] === "assistant" && data["isSidechain"] !== true) {

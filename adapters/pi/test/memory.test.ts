@@ -5,14 +5,16 @@ import path from "node:path";
 import { test } from "node:test";
 import type { Answers } from "../../afk/src/shared/jev-client.ts";
 import {
+  appendIndex,
   candidates,
+  normalize,
   memoryDir,
   memoryQuestions,
   noteFile,
   verdict,
   MAX_CANDIDATES,
 } from "../../../src/compact/memory.ts";
-import { decide, lastTurn } from "../../../src/completion.ts";
+import { clipTask, decide, lastTurn } from "../../../src/completion.ts";
 
 const user = (text: string) => ({ role: "user", text });
 
@@ -63,7 +65,7 @@ test("noteFile writes verbatim text with frontmatter", () => {
   assert.ok(body.startsWith(`---\nname: ${name}\n`));
   assert.ok(body.includes("Never use emojis in commits: ever.\n"));
   assert.ok(body.includes("session abcdef12"));
-  assert.ok(!body.split("\n")[2]!.slice("description: ".length).includes(":"));
+  assert.equal(body.split("\n")[2], 'description: "Never use emojis in commits: ever."');
 });
 
 test("memoryDir follows the project slug", () => {
@@ -120,4 +122,44 @@ test("decide exempts legitimate stops and bands the rest", () => {
   assert.equal(decide(ans(0.99, "blocked")).band, "none");
   assert.equal(decide(ans(0.99, "needs_user")).band, "none");
   assert.equal(decide({}).band, "none");
+});
+
+test("noteFile quotes a description that starts with a bracket", () => {
+  const [, body] = noteFile("[priority] always run the linter first", "feedback", undefined, "2026-10-02");
+
+  assert.equal(body.split("\n")[2], 'description: "[priority] always run the linter first"');
+});
+
+test("appendIndex escapes the label so text cannot rewrite the link", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-mem-"));
+
+  appendIndex(dir, "note-abc123", "see [docs](http://evil.example) for the rule");
+  const line = fs.readFileSync(path.join(dir, "MEMORY.md"), "utf8");
+
+  assert.ok(line.startsWith("- [see \\[docs\\]\\(http://evil.example\\) for the rule]"));
+  assert.ok(line.includes("](note-abc123.md)"));
+});
+
+test("normalize makes case and spacing differences equal", () => {
+  assert.equal(normalize("Always  RUN\nthe linter"), normalize("always run the linter"));
+});
+
+test("clipTask keeps the head and tail of a long request", () => {
+  const long = "A".repeat(900) + "M".repeat(2000) + "Z".repeat(600);
+  const out = clipTask(long);
+
+  assert.ok(out.startsWith("A".repeat(900)));
+  assert.ok(out.endsWith("Z".repeat(600)));
+  assert.ok(out.includes("omitted"));
+  assert.equal(clipTask("short request"), "short request");
+});
+
+test("lastTurn keeps a request that starts with a heading or a path", () => {
+  const file = transcript([
+    { type: "user", uuid: "old", message: { content: "an older request about something" } },
+    { type: "user", uuid: "h1", message: { content: "# Refactor the API into modules" } },
+    { type: "assistant", message: { content: [{ type: "text", text: "Refactored the API into three modules." }] } },
+  ]);
+
+  assert.equal(lastTurn(file)?.uuid, "h1");
 });
