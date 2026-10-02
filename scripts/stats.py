@@ -300,7 +300,7 @@ def print_calls(days: int | None) -> None:
         categories = collections.Counter()
         for c in bad:
             error = str(c.get("error", "unknown"))
-            status = re.match(r"HTTP (\d{3})\b", error)
+            status = re.search(r"HTTP (\d{3})\b", error)
             category = (
                 status.group(0)
                 if status
@@ -314,9 +314,63 @@ def print_calls(days: int | None) -> None:
             print(f"      last failure {bad[-1].get('ts')}: {str(bad[-1].get('error'))[:160]}")
             good = [c for c in ordered if c.get("ok", True)]
             print(f"      last success: {good[-1].get('ts') if good else 'none in window'}")
+    print_providers(calls)
     print(
         "  Calls alone cannot measure coverage: disabled hooks and missing keys make no API call."
     )
+
+
+def retry_stats(calls: list[dict]) -> tuple[int, int, int, int]:
+    """Logical requests, retried requests, recovered requests, requests still failed.
+
+    Rows share a call_id across attempts; rows from before call_id was logged
+    count as single attempts."""
+    by_id = collections.defaultdict(list)
+    for i, c in enumerate(calls):
+        by_id[c.get("call_id") or f"row{i}"].append(c)
+    retried = recovered = failed = 0
+    for group in by_id.values():
+        last = max(group, key=lambda c: (c.get("attempt") or 1, c.get("ts", "")))
+        if len(group) > 1:
+            retried += 1
+            if last.get("ok", True):
+                recovered += 1
+        if not last.get("ok", True):
+            failed += 1
+    return len(by_id), retried, recovered, failed
+
+
+def print_providers(calls: list[dict]) -> None:
+    """The same latency and failure numbers split by provider, plus retries."""
+    per = collections.defaultdict(list)
+    for c in calls:
+        per[c.get("provider") or "?"].append(c)
+    print("  By provider (requests count a retried call once):")
+    print(
+        f"    {'provider':<14}{'attempts':>9}{'requests':>10}{'failed':>8}{'fail %':>8}"
+        f"{'retried':>9}{'recovered':>10}{'median ms':>11}{'p95 ms':>9}"
+    )
+    for provider, cs in sorted(per.items()):
+        requests, retried, recovered, failed = retry_stats(cs)
+        ms = [c["ms"] for c in cs]
+        share = f"{100 * failed / requests:.1f}" if requests else "-"
+        print(
+            f"    {provider:<14}{len(cs):>9}{requests:>10}{failed:>8}{share:>8}"
+            f"{retried:>9}{recovered:>10}{fmt_q(ms, 0.5):>11}{fmt_q(ms, 0.95):>9}"
+        )
+
+
+def print_completion(entries: list[dict]) -> None:
+    """What the end-of-turn completion check decided."""
+    rows = [e for e in entries if e.get("kind") == "completion" and "p" in e]
+    if not rows:
+        return
+    acted = sum(1 for e in rows if e.get("blocked"))
+    flagged = sum(1 for e in rows if e.get("band") == "flag")
+    reasons = collections.Counter(e.get("reason") or "?" for e in rows)
+    print(f"\nCompletion check ({len(rows)} turns judged):")
+    print(f"  sent back to finish: {acted}, flagged only: {flagged}")
+    print("  stop reasons: " + ", ".join(f"{k} {v}" for k, v in sorted(reasons.items())))
 
 
 def print_rule_outcomes(entries: list[dict]) -> None:
@@ -419,7 +473,15 @@ def main() -> int:
     p.add_argument("--log", default=DEFAULT_LOG)
     p.add_argument("--days", type=int, help="only decisions from the last N days")
     p.add_argument("--examples", type=int, default=0, help="show N mismatches")
+    p.add_argument(
+        "--calls", action="store_true", help="only the API call log and completion check"
+    )
     args = p.parse_args()
+
+    if args.calls:
+        print_calls(args.days)
+        print_completion(load_log(args.log, args.days))
+        return 0
 
     entries = load_log(args.log, args.days)
     if not entries:
@@ -531,6 +593,7 @@ def main() -> int:
                 )
 
     print_calls(args.days)
+    print_completion(entries)
     print_rule_outcomes(entries)
     print_compaction(args.days)
     return 0

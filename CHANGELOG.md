@@ -4,6 +4,13 @@ All notable changes to claude-jev. Format follows [Keep a Changelog](https://kee
 
 ## [Unreleased]
 
+- A completion check runs on every `Stop` through `src/completion.ts`. It gives Jev the user's request and the assistant's final reply and asks whether the turn ended before the request was finished. At 0.85 or more it blocks once or twice per session with a note to continue or name the blocker; between 0.6 and 0.85 it only prints a `systemMessage`. A reply Jev classes as blocked, waiting on the user, or plain chat is never blocked, and a continuation (`stop_hook_active`) is never checked again. The `completionCheck` option turns it off, and each judgment is a `kind: "completion"` row in `jev-router-log.jsonl`. This goes past the vision's rule that a turn that edited nothing has nothing to enforce, so it is a fork choice.
+- `/jev-stats` opens the call report directly, and `python3 scripts/stats.py --calls` prints it. The report now splits calls by provider and counts retries. `jev-calls.jsonl` rows carry `call_id` and `attempt`, so a request that failed with a 5xx and then succeeded counts once as retried and recovered. Older rows count as single attempts, and error categories now match `Error: HTTP 502` rows written by the TypeScript client.
+- Repo-only rules go in `.claude/rules/jev-rules.md`, which the rule hook already read; `docs/repo-rules.md` documents the format.
+- Memory curation, off by default (`memoryCuration`, needs function hooks): at compaction, user messages that state a lasting preference, correction or standing fact (0.8 or more) are written verbatim, secrets redacted, to `~/.claude/projects/<project>/memory/` with a line in `MEMORY.md`. At most five notes per compaction, skipping text already in the directory. Nothing is summarized.
+- `jev-compact-log.jsonl` redacts API keys in each row's `ref`, which held the first characters of every block unredacted.
+- The Pi client tests expect the Experiential provider and no longer depend on `EXPLABS_API_KEY` in the environment.
+
 ## [0.28.0] - 2026-10-01
 
 - Pi compaction lives in `adapters/pi/`. `pi install git:github.com/0x7067/claude-jev` loads `adapters/pi/jev.ts`, which handles `session_before_compact` and `/jev`. The hook calls `selectBlocks` in `src/compact/strategy.ts`. Block shaping, `toolCallId` pairing, bash and summary role labels, the `<read-files>` index, and logs under `PI_CODING_AGENT_DIR` stay in the adapter. Kept text is fit to 14,000 characters. Paths from dropped or truncated calls may add up to 2,000 characters. Pi's own read paths and `<modified-files>` sit outside that reservation. Claude's compaction budget stays 16,000 characters. A missing key returns nothing, so Pi's own summary runs. `0x7067/pi-jev` is unchanged.

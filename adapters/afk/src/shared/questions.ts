@@ -217,3 +217,34 @@ export const DEFAULT_SUBJECT = "other";
 export const DEFAULT_POLARITY = "forbid";
 
 export const ITEMS_PER_REQUEST = 15;
+
+export function completionBundle(): Questions {
+  return {
+    stopped_short: {
+      type: "noul",
+      instructions:
+        "Did the assistant end its turn before finishing what the user asked? " +
+        "Answer yes when work the request clearly needs is left undone, only " +
+        "partly done, or deferred without a real blocker, or when the assistant " +
+        "stops to ask permission for something the user already asked for. " +
+        "Answer no when the request is fully handled, when the assistant " +
+        "reports a concrete blocker, or when it asks the user a question it " +
+        "cannot answer itself.",
+      criteria: {
+        true: "The reply leaves part of the request undone or stops for no good reason",
+        false: "The request is handled, or the reply stops for a real reason",
+      },
+    } satisfies NoulQuestion,
+    stop_reason: {
+      type: "choice",
+      instructions: "Why did the assistant's last reply end the turn?",
+      criteria: {
+        done: "The request is finished and the reply reports the result",
+        partial: "Part of the request is done and the rest is left or deferred",
+        blocked: "A concrete obstacle such as an error, missing access or missing file stops further work",
+        needs_user: "The assistant needs a decision or information only the user can give",
+        chat: "The message was conversation or a question that needs only an answer",
+      },
+    } satisfies ChoiceQuestion,
+  };
+}

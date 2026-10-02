@@ -62,6 +62,11 @@
             "type": "command",
             "command": "node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/src/rules.ts",
             "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node --experimental-strip-types ${CLAUDE_PLUGIN_ROOT}/src/completion.ts",
+            "timeout": 10
           }
         ]
       }

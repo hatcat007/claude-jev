@@ -16,6 +16,7 @@ import {
   type Kept,
   type Stats,
 } from "./compact/strategy.ts";
+import { curateMemory } from "./compact/memory.ts";
 
 export const ROWS_HEADER =
   "This session's history was compacted by Jev. Every message below " +
@@ -42,6 +43,8 @@ interface LoggedStats extends Stats {
   rows_in?: number;
   rows_out?: number;
   passed_through?: number;
+  memory_asked?: number;
+  memory_saved?: number;
 }
 
 export function rowText(row: CompactRow): string | null {
@@ -95,7 +98,7 @@ function rowsOut(blocks: ClaudeBlock[], kept: Kept[]): CompactRow[] {
     const text = redactSecrets(k.text);
 
     if (row && plainRow(row) && k.text === block.text) {
-      out.push(typeof row.text === "string" ? { ...row, text: redactSecrets(row.text) } : row);
+      out.push(isString(row.text) ? { ...row, text: redactSecrets(row.text) } : row);
     } else out.push(textRow(block.role, text));
   }
 
@@ -115,6 +118,7 @@ function logStats(sessionId: string | undefined, stats: LoggedStats): void {
       session_id: sessionId ?? null,
       source: "rows",
       ...stats,
+      rows: stats.rows.map((r) => ({ ...r, ref: redactSecrets(r.ref) })),
     };
 
     appendLogLine(STATS_LOG, JSON.stringify(row));
@@ -128,6 +132,7 @@ interface CompactEvent {
   cwd?: string;
   session_id?: string;
   messages?: unknown;
+  memory?: boolean;
 }
 
 export async function rows(): Promise<number> {
@@ -159,6 +164,11 @@ export async function rows(): Promise<number> {
 
   if (blocks.length === 0) return fallback("no judgeable rows");
 
+  const memoryRun =
+    event.memory === true && event.cwd
+      ? curateMemory(blocks, event.cwd, redactSecrets, event.session_id).catch(() => null)
+      : Promise.resolve(null);
+
   let kept: Kept[];
   let stats: LoggedStats;
 
@@ -166,6 +176,13 @@ export async function rows(): Promise<number> {
     [kept, stats] = await selectBlocks(blocks, event.cwd ?? null, directive);
   } catch (e) {
     return fallback(`jev: ${String(e)}`);
+  }
+
+  const memory = await memoryRun;
+
+  if (memory) {
+    stats.memory_asked = memory.asked;
+    stats.memory_saved = memory.saved.length;
   }
 
   stats.trigger = event.trigger;

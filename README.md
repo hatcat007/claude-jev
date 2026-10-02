@@ -94,7 +94,7 @@ Rules come from the instruction files you already keep:
 
 - `CLAUDE.md` and `~/.claude/CLAUDE.md`
 - nested `AGENTS.md`
-- `.claude/rules/*` and `.cursor/rules/*`
+- `.claude/rules/*` and `.cursor/rules/*`. A repo-only rule file such as `.claude/rules/jev-rules.md` is read the same way; see `docs/repo-rules.md`.
 
 Nothing needs compiling, and nothing extra gets committed.
 
