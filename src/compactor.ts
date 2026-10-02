@@ -62,6 +62,21 @@ export function rowText(row: CompactRow): string | null {
   return judgeable(isString(row.role) ? row.role : "", blockText(content).trim());
 }
 
+const SECRET_PATTERNS: [RegExp, string][] = [
+  [/\bxpl_[A-Za-z0-9]{16,}/g, "xpl_[REDACTED]"],
+  [/\bsk-or-[A-Za-z0-9_-]{16,}/g, "sk-or-[REDACTED]"],
+  [/\bsk-ant-[A-Za-z0-9_-]{16,}/g, "sk-ant-[REDACTED]"],
+  [/\bsk-[A-Za-z0-9_-]{32,}/g, "sk-[REDACTED]"],
+];
+
+export function redactSecrets(text: string): string {
+  let out = text;
+
+  for (const [re, rep] of SECRET_PATTERNS) out = out.replace(re, rep);
+
+  return out;
+}
+
 function plainRow(row: CompactRow): boolean {
   return !row.toolUses && !row.toolResults;
 }
@@ -77,8 +92,11 @@ function rowsOut(blocks: ClaudeBlock[], kept: Kept[]): CompactRow[] {
     const block = blocks[k.i]!;
     const row = block.row;
 
-    if (row && plainRow(row) && k.text === block.text) out.push(row);
-    else out.push(textRow(block.role, k.text));
+    const text = redactSecrets(k.text);
+
+    if (row && plainRow(row) && k.text === block.text) {
+      out.push(typeof row.text === "string" ? { ...row, text: redactSecrets(row.text) } : row);
+    } else out.push(textRow(block.role, text));
   }
 
   return out;

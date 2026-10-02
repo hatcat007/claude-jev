@@ -71,6 +71,12 @@ export const PROVIDERS: Provider[] = [
     keyPrefix: "sk-or-",
     keyVar: "OPENROUTER_API_KEY",
   },
+  {
+    name: "experiential",
+    url: "https://api.experientiallabs.ai/v1/systemone",
+    keyPrefix: "xpl_",
+    keyVar: "EXPLABS_API_KEY",
+  },
 ];
 
 function providerFor(key: string): Provider {
@@ -146,7 +152,7 @@ export interface DecisionBackend {
 
 const DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 
-async function typedAsk(
+async function typedAskOnce(
   url: string,
   providerName: string,
   model: string,
@@ -192,6 +198,61 @@ async function typedAsk(
   } finally {
     clearTimeout(timer);
   }
+}
+
+const MAX_RETRIES_5XX = 6;
+
+async function askWithRetry(
+  url: string,
+  providerName: string,
+  model: string,
+  key: string,
+  state: string,
+  questions: Questions,
+  timeoutMs: number
+): Promise<Answers> {
+  const deadline = Date.now() + timeoutMs;
+
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await typedAskOnce(url, providerName, model, key, state, questions, Math.max(1, deadline - Date.now()));
+    } catch (e) {
+      if (!/HTTP 5\d\d/.test(String(e)) || attempt >= MAX_RETRIES_5XX || Date.now() + 300 >= deadline) throw e;
+
+      await new Promise((r) => setTimeout(r, 150 * (attempt + 1)));
+    }
+  }
+}
+
+const MAX_QUESTIONS: Record<string, number> = { experiential: 32 };
+
+async function typedAsk(
+  url: string,
+  providerName: string,
+  model: string,
+  key: string,
+  state: string,
+  questions: Questions,
+  timeoutMs: number
+): Promise<Answers> {
+  const cap = MAX_QUESTIONS[providerName];
+  const entries = Object.entries(questions);
+
+  if (!cap || entries.length <= cap) {
+    return askWithRetry(url, providerName, model, key, state, questions, timeoutMs);
+  }
+
+  const chunks: Questions[] = [];
+
+  for (let i = 0; i < entries.length; i += cap) {
+    chunks.push(Object.fromEntries(entries.slice(i, i + cap)));
+  }
+
+  const parts = await Promise.all(
+    chunks.map((c) => askWithRetry(url, providerName, model, key, state, c, timeoutMs))
+  );
+
+  return Object.assign({}, ...parts);
 }
 
 function logCall(provider: string, model: string, n: number, ms: number, error: string | null): void {
