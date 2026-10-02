@@ -295,7 +295,7 @@ test("saveNotes keeps at most five notes, highest confidence first", async () =>
   });
 });
 
-test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: !hasKey() }, async () => {
+test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: process.env["JEV_LIVE_TESTS"] !== "1" || !hasKey() }, async () => {
   await withConfigDir(async (cwd) => {
     const result = await curateMemory(
       [user(LINT), user("Please rename the function fooBar to bazQux in src/util.ts and rerun the tests.")],
