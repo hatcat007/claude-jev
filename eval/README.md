@@ -8,6 +8,7 @@ rule hook. They share nothing but the Jev client.
 | `rules_eval.py` | Judges edits through the same `judge_edit` the hook calls | yes |
 | `variants.py`, `replay.py`, `compare.py` | Router eval | yes |
 | `subagent_eval.py` | Subagent tier against the model you named yourself | yes |
+| `thresholds.ts` | Completion check and memory curation cut-offs against the live client; results in `docs/thresholds.md` | yes |
 | `audit_labels.json` | Hand labels for the router eval | yes |
 | `private/` | Cases that need repos not in this repo | no |
 | `data/` | Extracted edits, predictions, caches | no |

@@ -16,9 +16,9 @@ import {
 } from "../adapters/afk/src/shared/json.ts";
 import { appendLogLine, configDir, enabled, ROUTER_LOG } from "../adapters/afk/src/shared/config.ts";
 
-const ACT = 0.85;
+export const ACT_BAND = 0.85;
 
-const FLAG = 0.6;
+export const FLAG_BAND = 0.6;
 
 const MAX_BLOCKS = 2;
 
@@ -162,7 +162,7 @@ export function decide(answers: Answers): Decision {
   const p = isNumber(raw) ? Math.min(1, Math.max(0, raw)) : 0;
   const reason = asChoice(answers["stop_reason"])?.choice ?? "";
   const exempt = EXEMPT_REASONS.has(reason);
-  const band: Band = exempt ? "none" : p >= ACT ? "act" : p >= FLAG ? "flag" : "none";
+  const band: Band = exempt ? "none" : p >= ACT_BAND ? "act" : p >= FLAG_BAND ? "flag" : "none";
 
   return { p, reason, band };
 }

@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import type { Answers } from "../../afk/src/shared/jev-client.ts";
+import { hasKey, type Answers } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
   candidates,
@@ -295,9 +295,7 @@ test("saveNotes keeps at most five notes, highest confidence first", async () =>
   });
 });
 
-const liveKey = ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "EXPLABS_API_KEY"].some((v) => process.env[v]);
-
-test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: !liveKey }, async () => {
+test("curateMemory with the live Jev client keeps a lasting preference and drops a one-off task", { skip: !hasKey() }, async () => {
   await withConfigDir(async (cwd) => {
     const result = await curateMemory(
       [user(LINT), user("Please rename the function fooBar to bazQux in src/util.ts and rerun the tests.")],

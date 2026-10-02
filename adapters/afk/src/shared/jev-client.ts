@@ -129,6 +129,16 @@ interface ResolvedKey {
   provider: Provider;
 }
 
+export function hasKey(): boolean {
+  try {
+    resolveKey();
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveKey(): ResolvedKey {
   const pinned = pinnedProvider();
 
