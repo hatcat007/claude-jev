@@ -2,14 +2,14 @@
 
 `src/mcp-server.ts` is a stdio [MCP](https://modelcontextprotocol.io) server that exposes Jev's typed judgments to any host that can launch an MCP server: [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent), OpenCode, Cursor, Codex, and Claude Code itself. It is separate from the hooks: hooks are fences the agent cannot skip, these tools are lenses the agent chooses to use. It is opt-in and nothing in the hooks depends on it.
 
-It uses the same client as the hooks, so it reads the same key variables (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`) and writes each call to `jev-calls.jsonl`, which the Stats row counts under the caller `mcp-server`. It has no dependencies beyond Node 22.18 or newer.
+It uses the same client as the hooks, so it reads the same key variables (`TYPESAFE_API_KEY`, `OPENROUTER_API_KEY`, `EXPLABS_API_KEY`) and writes each call to `jev-calls.jsonl`, which the Stats row counts under the caller `mcp-server`. It has no dependencies beyond Node 22.18 or newer.
 
 ## Tools
 
 | Tool | Arguments | Returns |
 |---|---|---|
 | `jev_check` | `state`, `question`, optional `true_means` and `false_means` | `{"probability": 0..1}` |
-| `jev_classify` | `state`, `question`, `options` (label to meaning, at least two) | `{"choice", "confidence", "probabilities"}` |
+| `jev_classify` | `state`, `question`, `options` (label to meaning, at least two) | `{"choice", "confidence"}` and, when Jev returns them, `"probabilities"` |
 | `jev_score` | `state`, `question`, `scale` (ordered descriptions, lowest first) | `{"score": 0..1}` |
 | `jev_decide` | `state`, `questions` (name to a `noul`, `choice` or `score` question, up to 16) | answers keyed by name |
 
@@ -17,7 +17,7 @@ A bad argument, a missing key, or a Jev failure comes back as a tool result with
 
 ## Prime Agent
 
-Add a stdio server to `~/.prime/agent/settings.json`, or `.prime/agent/settings.json` in a project. The `env` form reads the key from Prime Agent's own environment, so the secret stays out of the file:
+Add a stdio server to `~/.prime/agent/settings.json`. The `env` form reads the key from Prime Agent's own environment, so the secret stays out of the file:
 
 ```json
 {

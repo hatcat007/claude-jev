@@ -1,4 +1,7 @@
+import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 import { jevAsk, type Answer, type Answers, type Question, type Questions } from "../adapters/afk/src/shared/jev-client.ts";
 import { isJsonArray, isJsonObject, isString, type Json, type JsonValue } from "../adapters/afk/src/shared/json.ts";
 
@@ -12,14 +15,34 @@ const MAX_QUESTIONS = 16;
 
 const TEXT = { type: "string" } as const;
 
-const QUESTION_SCHEMA = {
+const TRUE_FALSE = {
   type: "object",
-  properties: {
-    type: { enum: ["noul", "choice", "score"] },
-    instructions: TEXT,
-    criteria: {},
-  },
-  required: ["type", "instructions"],
+  properties: { true: TEXT, false: TEXT },
+  required: ["true", "false"],
+} as const;
+
+const QUESTION_SCHEMA = {
+  oneOf: [
+    {
+      type: "object",
+      properties: { type: { const: "noul" }, instructions: TEXT, criteria: TRUE_FALSE },
+      required: ["type", "instructions"],
+    },
+    {
+      type: "object",
+      properties: {
+        type: { const: "choice" },
+        instructions: TEXT,
+        criteria: { type: "object", additionalProperties: TEXT },
+      },
+      required: ["type", "instructions", "criteria"],
+    },
+    {
+      type: "object",
+      properties: { type: { const: "score" }, instructions: TEXT, criteria: { type: "array", items: TEXT } },
+      required: ["type", "instructions", "criteria"],
+    },
+  ],
 } as const;
 
 const TOOLS = [
@@ -101,6 +124,16 @@ function requireString(args: Json, key: string): string {
   return value;
 }
 
+function trueFalse(value: JsonValue | undefined, label: string): { true: string; false: string } | undefined {
+  if (value === undefined) return undefined;
+
+  if (!isJsonObject(value) || !isString(value["true"]) || !isString(value["false"])) {
+    throw new ToolInputError(`${label} must have string true and false entries`);
+  }
+
+  return { true: value["true"], false: value["false"] };
+}
+
 function stringList(value: JsonValue | undefined, label: string): string[] {
   const items = isJsonArray(value) ? value.filter(isString) : [];
 
@@ -118,7 +151,7 @@ function stringMap(args: Json, key: string): ChoiceCriteria {
     throw new ToolInputError(`${key} must be an object with at least two entries`);
   }
 
-  const out: ChoiceCriteria = {};
+  const out: ChoiceCriteria = Object.create(null);
 
   for (const [label, meaning] of Object.entries(value)) {
     if (!isString(meaning)) throw new ToolInputError(`${key}.${label} must be a string`);
@@ -135,7 +168,11 @@ function parseQuestion(name: string, raw: JsonValue | undefined): Question {
 
   const instructions = raw["instructions"];
 
-  if (raw["type"] === "noul") return { type: "noul", instructions };
+  if (raw["type"] === "noul") {
+    const criteria = trueFalse(raw["criteria"], `questions.${name}.criteria`);
+
+    return criteria ? { type: "noul", instructions, criteria } : { type: "noul", instructions };
+  }
 
   if (raw["type"] === "choice") return { type: "choice", instructions, criteria: stringMap(raw, "criteria") };
 
@@ -152,7 +189,13 @@ export function buildQuestions(tool: string, args: Json): Questions {
     const yes = args["true_means"];
     const no = args["false_means"];
 
-    if (isString(yes) && isString(no)) question.criteria = { true: yes, false: no };
+    if ((yes === undefined) !== (no === undefined)) {
+      throw new ToolInputError("true_means and false_means must be given together");
+    }
+
+    const criteria = trueFalse(yes === undefined ? undefined : { true: yes, false: no ?? null }, "true_means and false_means");
+
+    if (criteria) question.criteria = criteria;
 
     return { answer: question };
   }
@@ -176,7 +219,7 @@ export function buildQuestions(tool: string, args: Json): Questions {
       throw new ToolInputError(`questions must hold between 1 and ${MAX_QUESTIONS} entries`);
     }
 
-    const out: Questions = {};
+    const out: Questions = Object.create(null);
 
     for (const [name, value] of Object.entries(raw)) out[name] = parseQuestion(name, value);
 
@@ -227,11 +270,16 @@ async function callTool(params: Json): Promise<ToolResult> {
 }
 
 export async function handleMessage(message: Json): Promise<Reply | null> {
-  const id = message["id"];
-  const method = isString(message["method"]) ? message["method"] : "";
+  const hasId = "id" in message;
+  const id = message["id"] ?? null;
 
-  if (id === undefined || id === null) return null;
+  if (!hasId) return null;
 
+  if (id === null) return fail(null, -32600, "request id must not be null");
+
+  if (!isString(message["method"])) return fail(id, -32600, "method must be a string");
+
+  const method = message["method"];
   const params = isJsonObject(message["params"]) ? message["params"] : {};
 
   if (method === "initialize") {
@@ -295,6 +343,14 @@ async function serve(): Promise<void> {
   await Promise.all(pending);
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+function isEntry(): boolean {
+  try {
+    return fs.realpathSync(path.resolve(process.argv[1] ?? "")) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntry()) {
   await serve();
 }

@@ -5,41 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { buildQuestions, toPayload } from "../../../src/mcp-server.ts";
-import { isJsonArray, isJsonObject, isNumber, isString, type JsonValue } from "../../afk/src/shared/json.ts";
-
-const SERVER = path.resolve(import.meta.dirname, "../../../src/mcp-server.ts");
-
-export function at(value: JsonValue | undefined, ...keys: (string | number)[]): JsonValue | undefined {
-  let cur = value;
-
-  for (const key of keys) {
-    if (isNumber(key) && isJsonArray(cur)) cur = cur[key];
-    else if (isString(key) && isJsonObject(cur)) cur = cur[key];
-    else return undefined;
-  }
-
-  return cur;
-}
-
-export async function exchange(requests: object[], env: NodeJS.ProcessEnv): Promise<JsonValue[]> {
-  const child = spawn("node", ["--experimental-strip-types", SERVER], { env, stdio: ["pipe", "pipe", "ignore"] });
-  let out = "";
-
-  child.stdout.on("data", (chunk) => (out += chunk));
-  child.stdin.end(requests.map((r) => JSON.stringify(r)).join("\n") + "\n");
-  await new Promise((resolve) => child.on("close", resolve));
-
-  return out
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
-}
+import { type Questions } from "../../afk/src/shared/jev-client.ts";
+import { isJsonArray, type JsonValue } from "../../afk/src/shared/json.ts";
+import { at, exchange, SERVER } from "./mcp-helper.ts";
 
 function keylessEnv(): NodeJS.ProcessEnv {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-mcp-"));
   const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: dir, HOME: dir };
 
-  for (const key of ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "EXPLABS_API_KEY"]) delete env[key];
+  for (const key of ["TYPESAFE_API_KEY", "OPENROUTER_API_KEY", "EXPLABS_API_KEY", "CLAUDE_PLUGIN_OPTION_TYPESAFEAPIKEY", "AFK_HOOK_EVENT"]) delete env[key];
 
   return env;
 }
@@ -91,14 +65,18 @@ test("bad input and a missing key come back as tool errors, and bad JSON as a pa
   assert.equal(at(JSON.parse(out), "error", "code"), -32700);
 });
 
+function wire(value: Questions): JsonValue {
+  return JSON.parse(JSON.stringify(value));
+}
+
 test("buildQuestions maps each tool to the typed question Jev expects", () => {
-  assert.deepEqual(buildQuestions("jev_check", { question: "Safe?", true_means: "safe", false_means: "unsafe" }), {
+  assert.deepEqual(wire(buildQuestions("jev_check", { question: "Safe?", true_means: "safe", false_means: "unsafe" })), {
     answer: { type: "noul", instructions: "Safe?", criteria: { true: "safe", false: "unsafe" } },
   });
-  assert.deepEqual(buildQuestions("jev_classify", { question: "Which?", options: { a: "A", b: "B" } }), {
+  assert.deepEqual(wire(buildQuestions("jev_classify", { question: "Which?", options: { a: "A", b: "B" } })), {
     answer: { type: "choice", instructions: "Which?", criteria: { a: "A", b: "B" } },
   });
-  assert.deepEqual(buildQuestions("jev_score", { question: "Risk?", scale: ["none", "high"] }), {
+  assert.deepEqual(wire(buildQuestions("jev_score", { question: "Risk?", scale: ["none", "high"] })), {
     answer: { type: "score", instructions: "Risk?", criteria: ["none", "high"] },
   });
   assert.throws(() => buildQuestions("jev_score", { question: "Risk?", scale: ["only"] }), /at least two/);
@@ -110,4 +88,75 @@ test("toPayload turns a noul answer into a probability", () => {
   assert.deepEqual(toPayload("jev_check", { answer: { noul: 0.9 } }), { probability: 0.9 });
   assert.deepEqual(toPayload("jev_score", { answer: { score: 0.4 } }), { score: 0.4 });
   assert.throws(() => toPayload("jev_check", {}), /no answer/);
+});
+
+test("null-prototype maps keep a __proto__ option label and question name", () => {
+  const options = JSON.parse('{"__proto__":"odd","b":"B"}');
+  const built = buildQuestions("jev_classify", { question: "Which?", options });
+  const sent = JSON.parse(JSON.stringify(built));
+
+  assert.deepEqual(Object.keys(sent.answer.criteria).sort(), ["__proto__", "b"]);
+
+  const decided = buildQuestions("jev_decide", JSON.parse('{"questions":{"__proto__":{"type":"noul","instructions":"Q?"}}}'));
+
+  assert.deepEqual(Object.keys(JSON.parse(JSON.stringify(decided))), ["__proto__"]);
+});
+
+test("jev_decide keeps noul criteria, and jev_check rejects half a pair", () => {
+  const built = buildQuestions("jev_decide", {
+    questions: { safe: { type: "noul", instructions: "Safe?", criteria: { true: "safe", false: "unsafe" } } },
+  });
+
+  assert.deepEqual(built["safe"], { type: "noul", instructions: "Safe?", criteria: { true: "safe", false: "unsafe" } });
+  assert.throws(() => buildQuestions("jev_check", { question: "Safe?", true_means: "safe" }), /together/);
+  assert.throws(
+    () => buildQuestions("jev_decide", { questions: { a: { type: "noul", instructions: "Q?", criteria: { true: "x" } } } }),
+    /true and false/
+  );
+});
+
+test("an id of null and a non-string method are invalid requests, and an absent id is silent", async () => {
+  const replies = await exchange(
+    [
+      { jsonrpc: "2.0", id: null, method: "ping" },
+      { jsonrpc: "2.0", id: 7, method: 5 },
+      { jsonrpc: "2.0", method: "ping" },
+    ],
+    keylessEnv()
+  );
+
+  assert.equal(replies.length, 2);
+  assert.equal(at(replies[0], "error", "code"), -32600);
+  assert.equal(at(replies[0], "id"), null);
+  assert.equal(at(replies[1], "error", "code"), -32600);
+  assert.equal(at(replies[1], "id"), 7);
+});
+
+test("the server starts from a path containing # and ?", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "jev-mcp-#odd?-"));
+
+  try {
+    const copy = path.join(dir, "mcp-server.ts");
+
+    fs.symlinkSync(SERVER, copy);
+
+    const child = spawn("node", ["--experimental-strip-types", copy], { env: keylessEnv(), stdio: ["pipe", "pipe", "ignore"] });
+    let out = "";
+
+    child.stdout.on("data", (chunk) => (out += chunk));
+    child.stdin.end('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
+    await new Promise((resolve) => child.on("close", resolve));
+    assert.deepEqual(at(JSON.parse(out), "result"), {});
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("jev_decide advertises a typed variant for each question kind", async () => {
+  const replies = await exchange([{ jsonrpc: "2.0", id: 1, method: "tools/list" }], keylessEnv());
+  const tools = at(replies[0], "result", "tools");
+  const decide = isJsonArray(tools) ? tools[3] : undefined;
+  const variants = at(decide, "inputSchema", "properties", "questions", "additionalProperties", "oneOf");
+
+  assert.equal(isJsonArray(variants) ? variants.length : 0, 3);
 });
