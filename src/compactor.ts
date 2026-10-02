@@ -179,13 +179,25 @@ function claudeBlocks(incoming: CompactRow[]): ClaudeBlock[] {
   return blocks.reverse();
 }
 
+function memoryBlocks(incoming: CompactRow[]): Block[] {
+  const out: Block[] = [];
+
+  for (const r of incoming) {
+    if (r.role !== "user" || !noToolActivity(r)) continue;
+    const text = rowText(r);
+
+    if (text !== null) out.push({ role: "user", text });
+  }
+
+  return out;
+}
+
 export async function memoryOnly(): Promise<number> {
+  let reply = "{}";
+
   try {
     const event = await readStdinJson<CompactEvent>();
-
-    const blocks = claudeBlocks(incomingRows(event.messages)).filter(
-      (b) => b.row !== undefined && noToolActivity(b.row)
-    );
+    const blocks = memoryBlocks(incomingRows(event.messages));
 
     if (event.cwd && blocks.length > 0) {
       const result = await curateMemory(blocks, event.cwd, redactSecrets, event.session_id);
@@ -201,11 +213,14 @@ export async function memoryOnly(): Promise<number> {
           memory_saved: result.saved.length,
         })
       );
+
+      reply = JSON.stringify({ asked: result.asked, saved: result.saved.length });
     }
-  } catch {
+  } catch (e) {
+    reply = JSON.stringify({ error: String(e).slice(0, 300) });
   }
 
-  process.stdout.write("{}\n");
+  process.stdout.write(reply + "\n");
 
   return 0;
 }
@@ -228,7 +243,7 @@ export async function rows(): Promise<number> {
 
   const memoryRun =
     event.memory === true && event.cwd
-      ? curateMemory(blocks.filter((b) => b.row !== undefined && noToolActivity(b.row)), event.cwd, redactSecrets, event.session_id).catch(() => null)
+      ? curateMemory(memoryBlocks(incoming), event.cwd, redactSecrets, event.session_id).catch(() => null)
       : Promise.resolve(null);
 
   let kept: Kept[];
@@ -276,7 +291,9 @@ if (isMain) {
         process.exit(0);
       });
   } else if (process.argv[2] === "memory") {
-    memoryOnly().then((code) => process.exit(code));
+    memoryOnly()
+      .then((code) => process.exit(code))
+      .catch(() => process.exit(0));
   } else {
     process.stderr.write("usage: compactor.ts rows|memory  (reads a session.compact event on stdin)\n");
     process.exit(2);

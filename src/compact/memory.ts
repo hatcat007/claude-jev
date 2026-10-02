@@ -193,7 +193,8 @@ export async function curateMemory(
   blocks: Block[],
   cwd: string,
   redact: (text: string) => string,
-  sessionId: string | undefined
+  sessionId: string | undefined,
+  ask: typeof jevAsk = jevAsk
 ): Promise<MemoryResult> {
   const cands = candidates(blocks);
 
@@ -204,7 +205,7 @@ export async function curateMemory(
   for (let i = 0; i < cands.length; i += CHUNK) chunks.push(cands.slice(i, i + CHUNK));
 
   const answered = await Promise.all(
-    chunks.map((chunk) => jevAsk(memoryState(chunk), memoryQuestions(chunk), TIMEOUT_MS).catch(() => null))
+    chunks.map((chunk) => ask(memoryState(chunk), memoryQuestions(chunk), TIMEOUT_MS).catch(() => null))
   );
 
   const dir = memoryDir(cwd);

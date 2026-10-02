@@ -514,11 +514,19 @@ export function register(on, options) {
         try {
           const [cwd, sessionId] = await Promise.all([$.session.cwd(), $.session.id()]);
 
-          await runNode(
+          const run = await runNode(
             $,
             ["src/compactor.ts", "memory"],
             JSON.stringify({ trigger: e.trigger, cwd, session_id: sessionId, messages: e.messages }),
           );
+
+          if (run.exitCode !== 0) {
+            await $.ui.log(`jev-memory: exit ${run.exitCode}: ${run.stderr.slice(0, 200)}`);
+          } else {
+            const result = JSON.parse(run.stdout || "{}");
+
+            if (result.error) await $.ui.log(`jev-memory: ${result.error}`);
+          }
         } catch (err) {
           await $.ui.log(`jev-memory: ${String(err)}`);
         }

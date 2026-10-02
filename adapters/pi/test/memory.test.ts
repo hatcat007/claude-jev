@@ -3,10 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
-import type { Answers } from "../../afk/src/shared/jev-client.ts";
+import type { Answers, Questions } from "../../afk/src/shared/jev-client.ts";
 import {
   appendIndex,
   candidates,
+  curateMemory,
   normalize,
   memoryDir,
   memoryQuestions,
@@ -210,11 +211,82 @@ test("decide does not exempt a permission request", () => {
   assert.equal(decide(answers).band, "act");
 });
 
-test("an exclusive create refuses to overwrite an existing note", () => {
-  const dir = tempDir("jev-wx-");
-  const file = path.join(dir, "note.md");
+const sure = async (_state: string, questions: Questions): Promise<Answers> =>
+  Object.fromEntries(
+    Object.keys(questions).map((k) => [
+      k,
+      k.startsWith("memory_") ? { noul: 0.95 } : { choice: "feedback", confidence: 0.9 },
+    ])
+  );
 
-  fs.writeFileSync(file, "first", { flag: "wx" });
-  assert.throws(() => fs.writeFileSync(file, "second", { flag: "wx" }));
-  assert.equal(fs.readFileSync(file, "utf8"), "first");
+async function withConfigDir<T>(run: (cwd: string) => Promise<T>): Promise<T> {
+  const previous = process.env["CLAUDE_CONFIG_DIR"];
+
+  process.env["CLAUDE_CONFIG_DIR"] = tempDir("jev-cfg-");
+
+  try {
+    return await run("/tmp/proj-under-test");
+  } finally {
+    if (previous === undefined) delete process.env["CLAUDE_CONFIG_DIR"];
+    else process.env["CLAUDE_CONFIG_DIR"] = previous;
+  }
+}
+
+const identity = (text: string) => text;
+
+test("curateMemory saves a note once and skips it on the next compaction", async () => {
+  await withConfigDir(async (cwd) => {
+    const blocks = [user("Always run the linter before you commit anything in this repo.")];
+    const first = await curateMemory(blocks, cwd, identity, "sess1234", sure);
+    const second = await curateMemory(blocks, cwd, identity, "sess1234", sure);
+
+    assert.equal(first.saved.length, 1);
+    assert.equal(second.saved.length, 0);
+    assert.equal(fs.readdirSync(memoryDir(cwd)).filter((f) => f !== "MEMORY.md").length, 1);
+  });
+});
+
+test("curateMemory does not overwrite a file that already holds the name", async () => {
+  await withConfigDir(async (cwd) => {
+    const text = "Always run the linter before you commit anything in this repo.";
+    const [name] = noteFile(text, "feedback", undefined, "2026-10-02");
+    const file = path.join(memoryDir(cwd), `${name}.md`);
+
+    fs.mkdirSync(memoryDir(cwd), { recursive: true });
+    fs.writeFileSync(file, "someone else's note");
+
+    const result = await curateMemory([user(text)], cwd, identity, undefined, sure);
+
+    assert.equal(result.saved.length, 0);
+    assert.equal(fs.readFileSync(file, "utf8"), "someone else's note");
+    assert.ok(!fs.existsSync(path.join(memoryDir(cwd), "MEMORY.md")));
+  });
+});
+
+test("curateMemory saves a short note that is only a substring of an older one", async () => {
+  await withConfigDir(async (cwd) => {
+    const longer = "Always run the linter before you commit anything in this repo, and also run the type checker.";
+    const [name, body] = noteFile(longer, "feedback", undefined, "2026-10-02");
+
+    fs.mkdirSync(memoryDir(cwd), { recursive: true });
+    fs.writeFileSync(path.join(memoryDir(cwd), `${name}.md`), body);
+
+    const result = await curateMemory([user("run the linter before you commit anything in this repo")], cwd, identity, undefined, sure);
+
+    assert.equal(result.saved.length, 1);
+  });
+});
+
+test("curateMemory skips a message the redactor would change", async () => {
+  await withConfigDir(async (cwd) => {
+    const result = await curateMemory(
+      [user("Deploy with the token ghp_abcdefghijklmnopqrstuvwxyz0123 for every future session.")],
+      cwd,
+      (t) => t.replace(/ghp_\w+/g, "gh_[REDACTED]"),
+      undefined,
+      sure
+    );
+
+    assert.equal(result.saved.length, 0);
+  });
 });
